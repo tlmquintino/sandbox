@@ -1,27 +1,56 @@
 #!/usr/bin/env perl
 
+## inspired by http://www.xav.com/perl/lib/Pod/perltoot.html
+
 use strict;
 use warnings;
 
 use Person;
 
-my $him = Person->new();
+sub END { show_census() }
 
-$him->name("Jason");
-$him->age(23);
-$him->peers( "Norbert", "Rhys", "Phineas" );
+sub show_census ()  {
+    printf "current population: %d\n", Person->population;
+}
 
 my @all_recs;
-push @all_recs, $him;  # save object in array for later
 
-printf "%s is %d years old.\n", $him->name, $him->age;
+Person->debug(1);
+
+show_census();
+
+my $him = Person->new();
+
+show_census();
+
+push @all_recs, $him;  # save him ;)
+
+
+$him->fullname->christian("Jason");
+$him->fullname->surname("Meyers");
+$him->fullname->nickname("El Jaso");
+
+$him->fullname->title("Dr");
+
+$him->age(34);
+
+$him->peers( "Tiago", "Ralf", "Rai" );
+
+printf "%s is really %s.\n", $him->name, $him->fullname->as_string();
 print "His peers are: ", join(", ", $him->peers), "\n";
-printf "Last rec's name is %s\n", $all_recs[-1]->name;
 
 print $him->identify(),"\n";
 
-$him->happy_birthday();
+$him->happy_birthday;
 
 print $him->identify(),"\n";
 
-print $him->exclaim(),"\n";
+my $her = Person->new();
+show_census();
+
+$her->name("Dory");
+$her->age(19);
+
+print $her->identify(),"\n";
+
+show_census();
