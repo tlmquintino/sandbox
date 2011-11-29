@@ -5,6 +5,10 @@ project( sandbox C CXX )
 # include local cmake modules
 set( CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH} )
 
+find_package(Perl)
+
 add_subdirectory( cpp )
 
-add_subdirectory( perl )
+if(PERL_FOUND)
+  add_subdirectory( perl )
+endif()
