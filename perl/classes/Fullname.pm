@@ -1,5 +1,7 @@
 package Fullname;
 
+## inspired by http://perldoc.perl.org/perltoot.html
+
 use strict;
 use warnings;
 
