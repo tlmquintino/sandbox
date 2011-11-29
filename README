@@ -1,0 +1,12 @@
+A sandbox for playing with cpp, unix, perl, and other toys.
+
+BUILD
+
+Use cmake to build this project.
+
+mkdir build
+cd build
+cmake .. 
+make
+
+
