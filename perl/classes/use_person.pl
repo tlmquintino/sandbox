@@ -39,17 +39,21 @@ $him->age(34);
 $him->peers( "Tiago", "Ralf", "Rai" );
 
 printf "%s is really %s.\n", $him->name, $him->fullname->as_string();
-print "His peers are: ", join(", ", $him->peers), "\n";
 
-print $him->identify(),"\n";
+print $him->name, " has peers : ", join(", ", $him->peers), "\n";
+
+print $him->identify,"\n";
 
 ###################################################
 
 my $her = Employee->new();
 
+push @all_recs, $her;  # save her;)
+
 $her->name("Dory");
 $her->age(19);
+$her->peers( "Jenny", "Jane" );
 
-print $her->identify(),"\n";
+print $her->name, " has peers : ", join(", ", $her->peers), "\n";
 
 show_census();
