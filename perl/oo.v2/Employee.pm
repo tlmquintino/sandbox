@@ -1,36 +1,33 @@
 package Employee;
 
+use strict;
+use warnings;
 use Person;
 
-@ISA = ("Person");
+my %fields = (
+    id          => undef,
+    salary      => undef,
+);
+
+our @ISA = ("Person");
 
     # constructor
     sub new {
         my $class = shift;
         my $self  = $class->SUPER::new();
-        $self->{salary_}        = undef;
-        $self->{id_}            = undef;
-        bless ($self, $class); # reconsecrate
+        my($element);
+        foreach $element (keys %fields) { # place subclass fields into parent class
+            $self->{_permitted}->{$element} = $fields{$element};
+        }
+        @{$self}{keys %fields} = values %fields;
         return $self;
-    }
-
-    sub salary {
-        my $self = shift;
-        if (@_) { $self->{salary_} = shift }
-        return $self->{salary_};
-    }
-
-    sub id_number {
-        my $self = shift;
-        if (@_) { $self->{id_} = shift }
-        return $self->{id_};
     }
 
     # overridden methods (c++ virtual)
     sub peers {
         my $self = shift;
-        if (@_) { @{ $self->{peers_} } = @_ }
-        return map { "[$_]" } @{ $self->{peers_} };
+        if (@_) { @{ $self->{peers} } = @_ }
+        return map { "[$_]" } @{ $self->{peers} };
     }
 
 1; # Employee

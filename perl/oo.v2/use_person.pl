@@ -44,16 +44,14 @@ show_census();
 $him->fullname->christian("Jason");
 $him->fullname->surname("Meyers");
 $him->fullname->nickname("El Jaso");
-
 $him->fullname->title("Dr");
-
 $him->age(34);
-
-$him->peers( "Tiago", "Ralf", "Rai" );
+$him->peers( [ "Tiago", "Ralf", "Rai" ] );
 
 printf "%s is really %s.\n", $him->name, $him->fullname->as_string();
+$him->exclaim;
 
-print $him->name, " has peers : ", join(", ", $him->peers), "\n";
+print $him->name, " has peers : ", join(", ", @{$him->peers}), "\n"; # Person returns peers as ref
 
 print $him->identify,"\n";
 
@@ -69,7 +67,7 @@ $her->name("Dory");
 $her->age(19);
 $her->peers( "Jenny", "Jane" );
 
-print $her->name, " has peers : ", join(", ", $her->peers), "\n";
+print $her->name, " has peers : ", join(", ", $her->peers), "\n"; # Person returns peers via its function peers()
 
 print "\n";
 #--------------------------------------

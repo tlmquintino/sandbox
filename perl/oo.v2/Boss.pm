@@ -1,4 +1,4 @@
 package Boss;
 use Employee;
-@ISA = qw(Employee);
+our @ISA = qw(Employee);
 1; # end Boss

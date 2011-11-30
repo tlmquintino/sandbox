@@ -133,5 +133,4 @@ sub name
     return $self->{fullname}->christian(@_);
 }
 
-
 1;  # close package Person
