@@ -35,12 +35,11 @@ show_census();
 
 my $him = Person->new();
 
-show_census();
-
 push @all_recs, $him;  # save him ;)
 
 print "\n";
 #--------------------------------------
+show_census();
 
 $him->fullname->christian("Jason");
 $him->fullname->surname("Meyers");
@@ -60,6 +59,7 @@ print $him->identify,"\n";
 
 print "\n";
 #--------------------------------------
+show_census();
 
 my $her = Employee->new();
 
@@ -73,6 +73,8 @@ print $her->name, " has peers : ", join(", ", $her->peers), "\n";
 
 print "\n";
 #--------------------------------------
+show_census();
+
 
 my $boss = Boss->new();
     $boss->fullname->title("Don");
@@ -84,6 +86,8 @@ my $boss = Boss->new();
     printf "%s is age %d.\n", $boss->fullname->as_string, $boss->age;
     printf "His peers are: %s\n", join(", ", $boss->peers);
 
-print Dumper($boss);
+# print Dumper($boss);
 
+print "\n";
+#--------------------------------------
 show_census();

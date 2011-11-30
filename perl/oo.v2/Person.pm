@@ -5,48 +5,67 @@ package Person;
 use strict;
 use warnings;
 
+# perl packages
 use Carp;
+our $AUTOLOAD;  # it's a package global
 
 # local packages
 use Fullname;
 
 ###############################################################################
-## class variables (as in c++ static member)
-## global within this module
-##
-## anyway this is to avoid, because it messes up with inheritance
+## class variables
 
-my $debugging_ = 0;
-my $census_ = 0;
+    my $debugging_ = 0;
+    my $census_ = 0;
+
+###############################################################################
+## member fields
+
+    my %fields = (
+        fullname    => Fullname->new(),
+        age         => undef,
+        peers       => [],
+    );
 
 ###############################################################################
 ## constructors and destructors
 
-
     # 'bimodal' constructor - can be called with:
     #     $him = Person->new()
     #     $him = $me->new()
-    sub new
-    {
+    sub new {
         my $proto = shift;
         my $class = ref($proto) || $proto; # allows calling with reference
-        my $self  = {};
+        my $self  = {
+            _permitted => \%fields,
+            %fields,
+        };
 
         # "private" data
         $self->{"census_"} = \$census_;
-
         ++ ${ $self->{"census_"} };
-
-        $self->{name_}   = Fullname->new();
-        $self->{age_}    = undef;
-        $self->{peers_}  = [];
-        bless ($self, $class);             # this bless allows inheritance
+        bless $self, $class;
         return $self;
     }
 
+    # proxy method
+    sub AUTOLOAD {
+        my $self = shift;
+        my $type = ref($self) or croak "$self is not an object";
+        my $name = $AUTOLOAD;
+        $name =~ s/.*://;   # strip fully-qualified portion
+        unless (exists $self->{_permitted}->{$name} ) {
+            croak "Can't access `$name' field in class $type";
+        }
+        if (@_) {
+            return $self->{$name} = shift; # works as mutator
+        } else {
+            return $self->{$name};         # works as accessor
+        }
+    }
+
     # destructor
-    sub DESTROY
-    {
+    sub DESTROY {
         my $self = shift;
         if ($debugging_) { carp "destroying $self " . $self->name }
         -- ${ $self->{"census_"} };
@@ -76,11 +95,6 @@ my $census_ = 0;
 
 ###############################################################################
 ## public methods
-
-    sub fullname {
-        my $self = shift;
-        return $self->{name_};
-    }
 
     sub identify {
         my $self = shift;
@@ -116,21 +130,8 @@ my $census_ = 0;
 sub name
 {
     my $self = shift;
-    return $self->{name_}->christian(@_);
+    return $self->{fullname}->christian(@_);
 }
 
-sub age
-{
-    my $self = shift;
-    if (@_) { $self->{age_} = shift }
-    return $self->{age_};
-}
-
-sub peers
-{
-    my $self = shift;
-    if (@_) { @{ $self->{peers_} } = @_ }
-    return @{ $self->{peers_} };
-}
 
 1;  # close package Person
