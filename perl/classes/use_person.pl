@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-## inspired by http://www.xav.com/perl/lib/Pod/perltoot.html
+## inspired by http://perldoc.perl.org/perltoot.html
 
 use strict;
 use warnings;
