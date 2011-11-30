@@ -63,10 +63,15 @@ my $census_ = 0;
 ## debugging support
 
     sub debug {
-        my $class = shift;
-        if (ref $class)  { confess "Class method called as object method" }
-        unless (@_ == 1) { confess "usage: CLASSNAME->debug(level)" }
-        $debugging_ = shift;
+        my $self = shift;
+        confess "usage: thing->debug(level)" unless @_ == 1;
+        my $level = shift;
+        if (ref($self))  {
+            $self->{"debug_"} = $level;
+        } else {
+            $debugging_ = $level;            # whole class
+        }
+        $self->SUPER::debug($level);
     }
 
 ###############################################################################
