@@ -6,16 +6,17 @@ use strict;
 use warnings;
 
 use Person;
+use Employee;
 
 sub END { show_census() }
 
 sub show_census ()  {
-    printf "current population: %d\n", Person->population;
+    printf "population: %d\n", Person->population;
 }
 
 my @all_recs;
 
-Person->debug(1);
+# Person->debug(1);
 
 show_census();
 
@@ -25,6 +26,7 @@ show_census();
 
 push @all_recs, $him;  # save him ;)
 
+###################################################
 
 $him->fullname->christian("Jason");
 $him->fullname->surname("Meyers");
@@ -41,12 +43,9 @@ print "His peers are: ", join(", ", $him->peers), "\n";
 
 print $him->identify(),"\n";
 
-$him->happy_birthday;
+###################################################
 
-print $him->identify(),"\n";
-
-my $her = Person->new();
-show_census();
+my $her = Employee->new();
 
 $her->name("Dory");
 $her->age(19);
