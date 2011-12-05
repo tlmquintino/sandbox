@@ -15,7 +15,7 @@ int main()
     {
         ptr = new int[size];
     }
-    catch ( std::bad_alloc& e )
+    catch ( const std::bad_alloc& e )
     {
         std::cerr << "bad alloc caught: " << e.what() << std::endl;
     }
