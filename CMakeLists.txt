@@ -9,4 +9,5 @@ add_subdirectory( cpp )
 add_subdirectory( go )
 add_subdirectory( perl )
 add_subdirectory( unix )
+add_subdirectory( boost )
 
