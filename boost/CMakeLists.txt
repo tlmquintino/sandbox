@@ -1,7 +1,17 @@
+option( ENABLE_BOOST "build boost stuff" ON )
+
+if( ENABLE_BOOST )
+
 set( Boost_USE_MULTITHREAD ON )
 set( Boost_NO_SYSTEM_PATHS ON )
 
 find_package( Boost 1.50 COMPONENTS date_time filesystem system thread )
+
+if( CMAKE_CXX_COMPILER_ID MATCHES "GNU"   OR
+    CMAKE_CXX_COMPILER_ID MATCHES "Intel" OR
+    CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
+    list( APPEND CMAKE_CXX_FLAGS "-std=c++11" )
+endif()
 
 if( Boost_FOUND )
 	
@@ -13,5 +23,8 @@ if( Boost_FOUND )
 	add_subdirectory( asio     )
 	add_subdirectory( optional )
 	add_subdirectory( thread   )
+	add_subdirectory( activeobjs )
+
+endif()
 
 endif()
