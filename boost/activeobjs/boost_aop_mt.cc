@@ -1,25 +1,36 @@
 /**
- * Active Objects using boost and c++11
+ * Active Objects using std c++11
  *
- * @todo
- *      * add kill message to remove one thread
- *      * return futures
- *      * make queue size fixed -- send may block
- *      * what to do to messages queued after the 'done' message?
+ * Multiple worker threads
+ * Fixed size queue
  *
  **/
 
+#define _GLIBCXX_USE_NANOSLEEP
 
 #include <iostream>
 #include <memory>
-
-#include <boost/thread.hpp>
+#include <thread>
+#include <chrono>
 
 #include "shared_queue.h"
 
 #define HERE  std::cout << "--" << __LINE__ << std::endl;
 
 typedef std::function<void()> Message;
+
+#define QUEUE_SIZE  128 // 0 => unlimited
+
+#define N_CONSUMERS 48
+#define N_PRODUCERS 24
+
+#define DELAY_PRINT 100 // ms
+#define DELAY_WORK1 50  // ms x2
+#define DELAY_WORK2 150 // ms
+
+#define DELAY_PRODUCER 130 // ms
+
+//-----------------------------------------------------------------------------
 
 class Active {
 
@@ -38,9 +49,9 @@ private: // methods
 
 private: // data
 
-    shared_queue<Message>      mq_;        ///< message queue
     bool                       done_;      ///< flag for finishing
-    std::vector<boost::thread> threads_;   ///< multiple threads object
+    shared_queue<Message>      mq_;        ///< message queue
+    std::vector<std::thread>   threads_;   ///< multiple threads object
 
 public: // methods
 
@@ -51,6 +62,8 @@ public: // methods
     /// Enqueue a message
     void send( Message msg );
 
+    size_t qsize() { return mq_.size(); }
+
     /// Factory -- construction & thread start
     static std::unique_ptr<Active> create( size_t nb_threads = 1 );
 
@@ -58,7 +71,7 @@ public: // methods
 
 //-----------------------------------------------------------------------------
 
-Active::Active(): done_(false)
+Active::Active(): done_(false), mq_( QUEUE_SIZE )
 {
 }
 
@@ -76,25 +89,21 @@ Active::~Active()
 
 void Active::send( Message msg )
 {
-    mq_.push(msg);
+    mq_.wait_and_push(msg);
 }
 
 //-----------------------------------------------------------------------------
 
 void Active::run()
 {
-  std::cout << "> starting run()" << std::endl;
+  std::cout << "> starting run()\n" << std::flush;
   while (!done_)
   {
     Message f;
-
-    // timed wait so it gives chance to exit on done
-    if( mq_.wait_for_and_pop(f,std::chrono::milliseconds(100)) )
-        f();
-    else
-        std::cout << "> timeout waiting for work ..." << std::endl;
+    mq_.wait_and_pop(f);
+    f();
   }
-  std::cout << "> ending run()" << std::endl;
+  std::cout << "> ending run()\n" << std::flush;
 }
 
 //-----------------------------------------------------------------------------
@@ -103,36 +112,61 @@ std::unique_ptr<Active> Active::create( size_t nb_threads )
 {
     std::unique_ptr<Active> pao( new Active() );
     for( size_t i = 0; i < nb_threads; ++i )
-        pao->threads_.push_back(  boost::thread(&Active::run, pao.get()) );
+        pao->threads_.push_back(  std::thread(&Active::run, pao.get()) );
     return pao;
 }
 
 //-----------------------------------------------------------------------------
 
-void foo()
+void work1()
 {
-    std::cout << "[1] foo() ...\n";
-    ::sleep(1);
+//    std::cout << "-- work1() ...\n" << std::flush;
+    std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_WORK1));
 }
 
-void bar()
+void work2()
 {
-    std::cout << "[2] bar() ...\n";
-    ::sleep(1);
+//    std::cout << "-- work2() ...\n" << std::flush;
+    std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_WORK2));
+}
+
+void produce( std::unique_ptr<Active>& ao )
+{
+    while( true )
+    {
+        ao->send( &work1 );
+        ao->send( &work1 );
+        ao->send( &work2 );
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_PRODUCER));
+    }
+}
+
+void print( std::unique_ptr<Active>& ao )
+{
+    while( true )
+    {
+        std::cout << "> queue [" << ao->qsize() << "]\n" << std::flush;
+        std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_PRINT));
+    }
 }
 
 int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    std::unique_ptr<Active> ao = Active::create( 7 );
+    std::unique_ptr<Active> ao = Active::create( N_CONSUMERS );
 
-    for( size_t i = 0; i < 20; ++i )
-    {
-        ao->send( &foo );
-        ao->send( &foo );
-        ao->send( &bar );
-    }
+    std::vector<std::thread> prod;   ///< multiple producers
+    for( size_t i = 0; i < N_PRODUCERS; ++i)
+        prod.push_back( std::thread( produce, std::ref(ao) ) );
+
+    std::thread p( print, std::ref(ao) );
+
+    for( size_t i = 0; i < prod.size(); ++i)
+        prod[i].join();
+
+    p.join();
 
     std::cout << "> ending main" << std::endl;
 }

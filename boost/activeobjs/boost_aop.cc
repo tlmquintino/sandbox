@@ -1,19 +1,16 @@
 /**
  * Active Objects using boost and c++11
  *
- * @todo
- *      * support multiple worker threads
- *      * return futures
- *      * make queue size fixed -- send may block
- *      * what to do to messages queued after the 'done' message?
+ * Single worker thread
  *
  **/
 
+#define _GLIBCXX_USE_NANOSLEEP
 
 #include <iostream>
 #include <memory>
-
-#include <boost/thread.hpp>
+#include <thread>
+#include <chrono>
 
 #include "shared_queue.h"
 
@@ -40,7 +37,7 @@ private: // data
 
     shared_queue<Message>      mq_;        ///< message queue
     bool                       done_;      ///< flag for finishing
-    boost::thread              thd_;       ///< thread object
+    std::thread              thd_;       ///< thread object
 
 public: // methods
 
@@ -97,7 +94,7 @@ void Active::run()
 std::unique_ptr<Active> Active::create()
 {
     std::unique_ptr<Active> pao( new Active() );
-    pao->thd_ = boost::thread(&Active::run, pao.get());
+    pao->thd_ = std::thread(&Active::run, pao.get());
     return pao;
 }
 
@@ -106,13 +103,13 @@ std::unique_ptr<Active> Active::create()
 void foo()
 {
     std::cout << "[1] foo() ...\n";
-    ::sleep(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
 void bar()
 {
     std::cout << "[2] bar() ...\n";
-    ::sleep(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
 int main()
