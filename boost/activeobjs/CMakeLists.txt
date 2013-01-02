@@ -5,6 +5,7 @@
 #      * what to do to messages queued after the 'done' message?
 #          - add a closed method to the queue class?
 #          - how to return errors?
+#      * use boost instead of std c++ 11
 
 ### active object with single worker thread
 ### suitable for wrapping around resources that need synchronized access

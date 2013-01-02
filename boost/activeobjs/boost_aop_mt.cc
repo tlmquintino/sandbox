@@ -15,9 +15,11 @@
 
 #include "shared_queue.h"
 
+//-----------------------------------------------------------------------------
+
 #define HERE  std::cout << "--" << __LINE__ << std::endl;
 
-typedef std::function<void()> Message;
+//-----------------------------------------------------------------------------
 
 #define QUEUE_SIZE  128 // 0 => unlimited
 
@@ -29,6 +31,10 @@ typedef std::function<void()> Message;
 #define DELAY_WORK2 150 // ms
 
 #define DELAY_PRODUCER 130 // ms
+
+//-----------------------------------------------------------------------------
+
+typedef std::function<void()> Message;
 
 //-----------------------------------------------------------------------------
 
