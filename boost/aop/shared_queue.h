@@ -10,35 +10,48 @@
 #include <boost/noncopyable.hpp>
 
 template<typename T>
-class shared_queue : private boost::noncopyable
-{
-    size_t max_;
+class shared_queue : private boost::noncopyable {
+
+private: // data
+
+    bool   open_;     ///< if queue is accepting more entries
+    size_t max_;      ///< maximum size of queue
 
     std::queue<T> queue_;
     mutable boost::mutex m_;
     boost::condition_variable data_cond_;
 
-public:
+public: // methods
 
-  shared_queue( size_t max = 0 ) : max_(max){}
-
-  void wait_and_push( T item )
+  shared_queue( size_t max = 0 ) :
+      open_(true),
+      max_(max)
   {
-      if( max_ )
-      {
-        boost::unique_lock<boost::mutex> lock(m_);
-        while( queue_.size() >= max_ )
-        {
-          data_cond_.wait(lock);
-        }
-        queue_.push(item);
-        data_cond_.notify_one();
-      }
-      else
-          push(item);
   }
 
-  void push(T item)
+  bool wait_and_push( T item )
+  {
+      boost::unique_lock<boost::mutex> lock(m_);
+
+      if( open_ )
+      {
+          if( max_ )
+          {
+            while( queue_.size() >= max_ )
+            {
+              data_cond_.wait(lock);
+            }
+          }
+
+          queue_.push(item);
+          data_cond_.notify_one();
+
+      }
+      return open_;
+  }
+
+  /// Forces an entry into the queue irrespective of size or open status
+  void push( T item )
   {
     boost::lock_guard<boost::mutex> lock(m_);
     queue_.push(item);
@@ -69,17 +82,30 @@ public:
     data_cond_.notify_one();
   }
 
+  void open( bool o )
+  {
+    boost::lock_guard<boost::mutex> lock(m_);
+    open_ = o;
+  }
+
   bool empty() const
   {
     boost::lock_guard<boost::mutex> lock(m_);
     return queue_.empty();
   }
 
-  unsigned size() const
+  size_t size() const
   {
     boost::lock_guard<boost::mutex> lock(m_);
     return queue_.size();
   }
+
+  void max_size( const size_t& s )
+  {
+    boost::lock_guard<boost::mutex> lock(m_);
+    max_ = s;
+  }
+
 };
 
 #endif

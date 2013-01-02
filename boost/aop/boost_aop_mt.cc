@@ -10,13 +10,12 @@
 #include <memory>
 
 #include <boost/chrono.hpp>
-#include <boost/function.hpp>
-#include <boost/noncopyable.hpp>
 #include <boost/ref.hpp>
-#include <boost/shared_ptr.hpp>
-#include <boost/thread.hpp>
+#include <boost/random/mersenne_twister.hpp>
+#include <boost/random/uniform_int_distribution.hpp>
 
 #include "shared_queue.h"
+#include "ActiveMT.h"
 
 //-----------------------------------------------------------------------------
 
@@ -24,106 +23,20 @@
 
 //-----------------------------------------------------------------------------
 
+#define RUN_TIME     30 // s
 #define QUEUE_SIZE  128 // 0 => unlimited
 
 #define N_CONSUMERS 48
 #define N_PRODUCERS 24
 
-#define DELAY_PRINT 100 // ms
+#define DELAY_ADD_THREAD 100 // ms
+#define DELAY_RM_THREAD  200 // ms
+
+#define DELAY_PRINT 80 // ms
 #define DELAY_WORK1 50  // ms x2
 #define DELAY_WORK2 150 // ms
 
-#define DELAY_PRODUCER 130 // ms
-
-//-----------------------------------------------------------------------------
-
-typedef boost::function<void()> Message;
-
-//-----------------------------------------------------------------------------
-
-class Active : private boost::noncopyable {
-
-private: // methods
-
-    /// Constructor
-    /// Starts up everything, using run as the thread mainline
-    Active();
-
-    /// Flags the
-    void finish(){ done_ = true; }
-    void run();
-
-private: // data
-
-    bool                       done_;      ///< flag for finishing
-    shared_queue<Message>      mq_;        ///< message queue
-    std::vector< boost::shared_ptr< boost::thread > > threads_;   ///< multiple threads object
-
-public: // methods
-
-    /// Destructor
-    /// Enqueue done message and wait for queue to drain
-    virtual ~Active();
-
-    /// Enqueue a message
-    void send( Message msg );
-
-    size_t qsize() { return mq_.size(); }
-
-    /// Factory -- construction & thread start
-    static boost::shared_ptr<Active> create( size_t nb_threads = 1 );
-
-};
-
-//-----------------------------------------------------------------------------
-
-Active::Active(): done_(false), mq_( QUEUE_SIZE )
-{
-}
-
-Active::~Active()
-{
-  Message finish_msg = boost::bind( &Active::finish, this );
-  // enqueue finish message
-  send(finish_msg);
-  // wait for all processing in queue
-  for( size_t i = 0; i < threads_.size(); ++i )
-      threads_[i]->join();
-}
-
-//-----------------------------------------------------------------------------
-
-void Active::send( Message msg )
-{
-    mq_.wait_and_push(msg);
-}
-
-//-----------------------------------------------------------------------------
-
-void Active::run()
-{
-  std::cout << "> starting run()\n" << std::flush;
-  while (!done_)
-  {
-    Message f;
-    mq_.wait_and_pop(f);
-    f();
-  }
-  std::cout << "> ending run()\n" << std::flush;
-}
-
-//-----------------------------------------------------------------------------
-
-boost::shared_ptr<Active> Active::create( size_t nb_threads )
-{
-    boost::shared_ptr<Active> pao( new Active() );
-    for( size_t i = 0; i < nb_threads; ++i )
-    {
-        boost::shared_ptr<boost::thread> p( new boost::thread(&Active::run, pao.get()) );
-        pao->threads_.push_back( p );
-    }
-    return pao;
-}
+#define DELAY_PRODUCER 20 // ms
 
 //-----------------------------------------------------------------------------
 
@@ -141,13 +54,16 @@ void work2()
 
 void produce( boost::shared_ptr<Active>& ao )
 {
+    boost::random::mt19937 gen;
+    boost::random::uniform_int_distribution<> dist(1,10);
+
     while( true )
     {
         ao->send( &work1 );
         ao->send( &work1 );
         ao->send( &work2 );
 
-        boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_PRODUCER));
+        boost::this_thread::sleep_for(boost::chrono::milliseconds(dist(gen)*DELAY_PRODUCER));
     }
 }
 
@@ -155,8 +71,35 @@ void print( boost::shared_ptr<Active>& ao )
 {
     while( true )
     {
-        std::cout << "> queue [" << ao->qsize() << "]\n" << std::flush;
+        std::cout << "> threads [" << ao->tsize() << "] queue [" << ao->qsize() << "]\n" << std::flush;
         boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_PRINT));
+    }
+}
+
+void add_threads( boost::shared_ptr<Active>& ao )
+{
+    boost::random::mt19937 gen;
+    boost::random::uniform_int_distribution<> dist(1,10);
+
+    while( true )
+    {
+        Active::Message add = boost::bind( &Active::add_thread, ao );
+        ao->send(add);
+        boost::this_thread::sleep_for(boost::chrono::milliseconds( dist(gen)*DELAY_ADD_THREAD) );
+    }
+}
+
+void remove_threads( boost::shared_ptr<Active>& ao )
+{
+    boost::random::mt19937 gen;
+    boost::random::uniform_int_distribution<> dist(1,10);
+
+    while( true )
+    {
+        Active::Message rm = boost::bind( &Active::remove_thread, ao );
+        ao->send(rm);
+        ao->send(rm);
+        boost::this_thread::sleep_for(boost::chrono::milliseconds( dist(gen)*DELAY_RM_THREAD ));
     }
 }
 
@@ -164,21 +107,45 @@ int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    boost::shared_ptr<Active> ao = Active::create( N_CONSUMERS );
+    boost::shared_ptr<Active> ao = Active::create( N_CONSUMERS, QUEUE_SIZE );
 
-    std::vector< boost::shared_ptr<boost::thread> > prod;   ///< multiple producers
+    // start all auxiliary threads
+
+    boost::thread p  ( print,          boost::ref(ao) );
+    boost::thread at ( add_threads,    boost::ref(ao) );
+    boost::thread rt ( remove_threads, boost::ref(ao) );
+
+
+    // start all producer threads
+
+    std::vector< Active::ThreadPtr > prod;
     for( size_t i = 0; i < N_PRODUCERS; ++i)
     {
         boost::shared_ptr<boost::thread> t( new boost::thread( produce, boost::ref(ao) ) );
         prod.push_back( t );
     }
 
-    boost::thread p( print, boost::ref(ao) );
+    boost::this_thread::sleep_for( boost::chrono::seconds( RUN_TIME ) );
+
+    // stop all producer threads
+
+    for( size_t i = 0; i < prod.size(); ++i)
+        prod[i]->interrupt();
+
+    // stop all auxiliary threads
+
+    at.interrupt();
+    rt.interrupt();
+    p.interrupt();
+
+    // join all threads
 
     for( size_t i = 0; i < prod.size(); ++i)
         prod[i]->join();
 
     p.join();
+    at.join();
+    rt.join();
 
     std::cout << "> ending main" << std::endl;
 }
