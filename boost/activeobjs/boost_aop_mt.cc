@@ -6,12 +6,15 @@
  *
  **/
 
-#define _GLIBCXX_USE_NANOSLEEP
-
 #include <iostream>
 #include <memory>
-#include <thread>
-#include <chrono>
+
+#include <boost/chrono.hpp>
+#include <boost/function.hpp>
+#include <boost/noncopyable.hpp>
+#include <boost/ref.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/thread.hpp>
 
 #include "shared_queue.h"
 
@@ -34,16 +37,13 @@
 
 //-----------------------------------------------------------------------------
 
-typedef std::function<void()> Message;
+typedef boost::function<void()> Message;
 
 //-----------------------------------------------------------------------------
 
-class Active {
+class Active : private boost::noncopyable {
 
 private: // methods
-
-    Active(const Active&) = delete;
-    Active& operator=(const Active&) = delete;
 
     /// Constructor
     /// Starts up everything, using run as the thread mainline
@@ -57,7 +57,7 @@ private: // data
 
     bool                       done_;      ///< flag for finishing
     shared_queue<Message>      mq_;        ///< message queue
-    std::vector<std::thread>   threads_;   ///< multiple threads object
+    std::vector< boost::shared_ptr< boost::thread > > threads_;   ///< multiple threads object
 
 public: // methods
 
@@ -71,7 +71,7 @@ public: // methods
     size_t qsize() { return mq_.size(); }
 
     /// Factory -- construction & thread start
-    static std::unique_ptr<Active> create( size_t nb_threads = 1 );
+    static boost::shared_ptr<Active> create( size_t nb_threads = 1 );
 
 };
 
@@ -83,12 +83,12 @@ Active::Active(): done_(false), mq_( QUEUE_SIZE )
 
 Active::~Active()
 {
-  Message finish_msg = std::bind( &Active::finish, this );
+  Message finish_msg = boost::bind( &Active::finish, this );
   // enqueue finish message
   send(finish_msg);
   // wait for all processing in queue
   for( size_t i = 0; i < threads_.size(); ++i )
-      threads_[i].join();
+      threads_[i]->join();
 }
 
 //-----------------------------------------------------------------------------
@@ -114,11 +114,14 @@ void Active::run()
 
 //-----------------------------------------------------------------------------
 
-std::unique_ptr<Active> Active::create( size_t nb_threads )
+boost::shared_ptr<Active> Active::create( size_t nb_threads )
 {
-    std::unique_ptr<Active> pao( new Active() );
+    boost::shared_ptr<Active> pao( new Active() );
     for( size_t i = 0; i < nb_threads; ++i )
-        pao->threads_.push_back(  std::thread(&Active::run, pao.get()) );
+    {
+        boost::shared_ptr<boost::thread> p( new boost::thread(&Active::run, pao.get()) );
+        pao->threads_.push_back( p );
+    }
     return pao;
 }
 
@@ -127,16 +130,16 @@ std::unique_ptr<Active> Active::create( size_t nb_threads )
 void work1()
 {
 //    std::cout << "-- work1() ...\n" << std::flush;
-    std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_WORK1));
+    boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_WORK1));
 }
 
 void work2()
 {
 //    std::cout << "-- work2() ...\n" << std::flush;
-    std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_WORK2));
+    boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_WORK2));
 }
 
-void produce( std::unique_ptr<Active>& ao )
+void produce( boost::shared_ptr<Active>& ao )
 {
     while( true )
     {
@@ -144,16 +147,16 @@ void produce( std::unique_ptr<Active>& ao )
         ao->send( &work1 );
         ao->send( &work2 );
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_PRODUCER));
+        boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_PRODUCER));
     }
 }
 
-void print( std::unique_ptr<Active>& ao )
+void print( boost::shared_ptr<Active>& ao )
 {
     while( true )
     {
         std::cout << "> queue [" << ao->qsize() << "]\n" << std::flush;
-        std::this_thread::sleep_for(std::chrono::milliseconds(DELAY_PRINT));
+        boost::this_thread::sleep_for(boost::chrono::milliseconds(DELAY_PRINT));
     }
 }
 
@@ -161,16 +164,19 @@ int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    std::unique_ptr<Active> ao = Active::create( N_CONSUMERS );
+    boost::shared_ptr<Active> ao = Active::create( N_CONSUMERS );
 
-    std::vector<std::thread> prod;   ///< multiple producers
+    std::vector< boost::shared_ptr<boost::thread> > prod;   ///< multiple producers
     for( size_t i = 0; i < N_PRODUCERS; ++i)
-        prod.push_back( std::thread( produce, std::ref(ao) ) );
+    {
+        boost::shared_ptr<boost::thread> t( new boost::thread( produce, boost::ref(ao) ) );
+        prod.push_back( t );
+    }
 
-    std::thread p( print, std::ref(ao) );
+    boost::thread p( print, boost::ref(ao) );
 
     for( size_t i = 0; i < prod.size(); ++i)
-        prod[i].join();
+        prod[i]->join();
 
     p.join();
 

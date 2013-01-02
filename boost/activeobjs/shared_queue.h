@@ -2,22 +2,21 @@
 #define shared_queue_h
 
 #include <queue>
-#include <mutex>
 #include <exception>
-#include <condition_variable>
-#include <chrono>
+
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/condition_variable.hpp>
+#include <boost/chrono.hpp>
+#include <boost/noncopyable.hpp>
 
 template<typename T>
-class shared_queue
+class shared_queue : private boost::noncopyable
 {
     size_t max_;
 
     std::queue<T> queue_;
-    mutable std::mutex m_;
-    std::condition_variable data_cond_;
-
-    shared_queue& operator=(const shared_queue&) = delete;
-    shared_queue(const shared_queue& other) = delete;
+    mutable boost::mutex m_;
+    boost::condition_variable data_cond_;
 
 public:
 
@@ -27,7 +26,7 @@ public:
   {
       if( max_ )
       {
-        std::unique_lock<std::mutex> lock(m_);
+        boost::unique_lock<boost::mutex> lock(m_);
         while( queue_.size() >= max_ )
         {
           data_cond_.wait(lock);
@@ -41,14 +40,14 @@ public:
 
   void push(T item)
   {
-    std::lock_guard<std::mutex> lock(m_);
+    boost::lock_guard<boost::mutex> lock(m_);
     queue_.push(item);
     data_cond_.notify_one();
   }
 
   bool try_and_pop(T& item)
   {
-    std::lock_guard<std::mutex> lock(m_);
+    boost::lock_guard<boost::mutex> lock(m_);
     if(queue_.empty()){
       return false;
     }
@@ -60,7 +59,7 @@ public:
 
   void wait_and_pop(T& item)
   {
-    std::unique_lock<std::mutex> lock(m_);
+    boost::unique_lock<boost::mutex> lock(m_);
     while(queue_.empty())
     {
       data_cond_.wait(lock);
@@ -72,13 +71,13 @@ public:
 
   bool empty() const
   {
-    std::lock_guard<std::mutex> lock(m_);
+    boost::lock_guard<boost::mutex> lock(m_);
     return queue_.empty();
   }
 
   unsigned size() const
   {
-    std::lock_guard<std::mutex> lock(m_);
+    boost::lock_guard<boost::mutex> lock(m_);
     return queue_.size();
   }
 };
