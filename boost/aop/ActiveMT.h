@@ -1,6 +1,8 @@
 #ifndef Active_h
 #define Active_h
 
+#define BOOST_THREAD_VERSION 3
+
 #include <boost/function.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
@@ -17,6 +19,21 @@ public: // types
     typedef boost::function< void() >          Message;
     typedef boost::shared_ptr< boost::thread > ThreadPtr;
 
+#if 0
+    struct ThreadPool : public std::map< boost::thread::id, ThreadPtr >
+    {
+        ~ThreadPool()
+        {
+            // wait for all threads still processing queue messages to exit normally
+            for( ThreadPool::iterator i = begin(); i != end(); ++i )
+                if( i->second->joinable() )
+                    i->second->join();
+        }
+    };
+#else
+    typedef std::map< boost::thread::id, ThreadPtr > ThreadPool;
+#endif
+
 private: // methods
 
     /// Constructor
@@ -24,21 +41,23 @@ private: // methods
     Active();
 
     /// Flags the Active object to finish
-    void finish(){ done_ = true; }
+    void finish();
+
+    /// Joins threads no longer used
+    void join_threads();
 
     /// Keeps executing the messages that are queued
     void run();
 
 private: // data
 
-    typedef std::map< boost::thread::id, ThreadPtr > ThreadPool;
+    bool                      done_;          ///< flag for finishing
+    mutable boost::mutex      m_;             ///< mutex for locking changes in the Active object itself
 
-    bool                      done_;      ///< flag for finishing
-    shared_queue<Message>     mq_;        ///< message queue
+    ThreadPool                threads_;       ///< multiple threads object
+    ThreadPool                intr_threads_;  ///< list of threads that were interrupted and need to be joined
 
-    mutable boost::mutex      m_;         ///< mutex for locking changes in the Active object itself
-
-    ThreadPool                threads_;   ///< multiple threads object
+    shared_queue<Message>     mq_;            ///< message queue
 
 public: // methods
 
@@ -47,7 +66,7 @@ public: // methods
     virtual ~Active();
 
     /// Enqueue a message
-    void send( Message msg );
+    bool send( Message msg );
 
     /// Adds one more thread
     void add_thread();
@@ -56,11 +75,7 @@ public: // methods
     void remove_thread();
 
     /// @returns the nb worker threads
-    size_t tsize()
-    {
-        boost::lock_guard<boost::mutex> lock(m_);
-        return threads_.size();
-    }
+    size_t tsize();
 
     /// @returns the current queue size
     size_t qsize() { return mq_.size(); }
@@ -79,42 +94,81 @@ Active::Active(): done_(false)
 {
 }
 
+//-----------------------------------------------------------------------------
+
 Active::~Active()
 {
-    // lock the object so no new threads are added while we destruct the object
+    std::cout << "Active::~Active()" << std::endl;
+
+    std::cout << "> waiting for the remaining tasks...\n" << std::flush;
+
+    mq_.drain_and_close();
+    done_ = true;
+
+//    // enqueue finish message -- we know this one is the last message on the queue
+//    mq_.push( boost::bind( &Active::finish, this ) );
+
+//    std::cout << "!! threads_.size() " << threads_.size() << "\n" << std::flush;
+//    std::cout << "!! intr_threads_.size() " << intr_threads_.size() << "\n" << std::flush;
+
+    //    std::cout << "> waiting for the remaining tasks... ( mq_.size() = " << mq_.size() << " )\n" << std::flush;
+
     boost::lock_guard<boost::mutex> lock(m_);
 
-    mq_.open(false); // don't accept more messages
-
-    // enqueue finish message -- we know this one is the last message on the queue
-    // note that here we force the push of the message
-    mq_.push( Message( boost::bind( &Active::finish, this ) ));
-
-    // wait for all threads still processing queue messages
+    // wait for all threads still processing queue messages to exit normally
     for( ThreadPool::iterator i = threads_.begin(); i != threads_.end(); ++i )
-        i->second->join();
+        if( i->second->joinable() )
+            i->second->join();
 
-    // deallocate the threads
-    threads_.clear();
-
-    // std::cout << "> final queue [" << mq_.size() << "]\n" << std::flush;
+    // wait for all threads still processing queue messages to exit normally
+    for( ThreadPool::iterator i = intr_threads_.begin(); i != intr_threads_.end(); ++i )
+        if( i->second->joinable() )
+            i->second->join();
 }
 
 //-----------------------------------------------------------------------------
 
-void Active::send( Message msg )
+bool Active::send( Message msg )
 {
-    mq_.wait_and_push(msg);
+    return mq_.wait_and_push(msg);
 }
+
+//-----------------------------------------------------------------------------
 
 void Active::add_thread()
 {
+    if( mq_.is_open() )
+    {
+        boost::lock_guard<boost::mutex> lock(m_);
+
+        ThreadPtr p( new boost::thread(&Active::run, this) );
+
+        threads_[ p->get_id() ] = p;
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+void Active::join_threads()
+{
     boost::lock_guard<boost::mutex> lock(m_);
 
-    ThreadPtr p( new boost::thread(&Active::run, this) );
+    for( ThreadPool::iterator i = intr_threads_.begin(); i != intr_threads_.end(); ++i )
+        if( i->second->joinable() )
+            i->second->join();
 
-    threads_[ p->get_id() ] = p;
+    intr_threads_.clear();
 }
+
+//-----------------------------------------------------------------------------
+
+void Active::finish()
+{
+    mq_.drain_and_close(); //< will wait until the queue is empty
+    done_ = true;
+}
+
+//-----------------------------------------------------------------------------
 
 void Active::remove_thread()
 {
@@ -123,17 +177,37 @@ void Active::remove_thread()
     if( threads_.size() == 1 ) // never remove last thread
         return;
 
+    if( ! mq_.is_open() ) // if queue is already closed don't bother
+        return;
+
     boost::thread::id tid = boost::this_thread::get_id();
     ThreadPool::iterator itr = threads_.find( tid );
 
     if( itr != threads_.end() )
     {
+        // erase the thread from pool
+
         ThreadPtr p = itr->second;
         assert( p->get_id() == tid );
         threads_.erase( itr );
-        p->interrupt();
-        boost::this_thread::interruption_point();
+
+        // add thread to join list
+        intr_threads_[tid] = p;
+
+        // try to queue joining threads, but may fail if queue !open
+        // in which case we don't care since destuctor will join
+        send( Message( boost::bind( &Active::join_threads, this ) ) );
+
+        throw boost::thread_interrupted();
     }
+}
+
+//-----------------------------------------------------------------------------
+
+size_t Active::tsize()
+{
+    boost::lock_guard<boost::mutex> lock(m_);
+    return threads_.size();
 }
 
 //-----------------------------------------------------------------------------
@@ -141,21 +215,38 @@ void Active::remove_thread()
 void Active::run()
 {
 //  std::cout << "> starting run()\n" << std::flush;
-  while (!done_)
-  {
-    try
+    while (!done_)
     {
-        Message f;
-        mq_.wait_and_pop(f);
-        f();
+#if 0
+        try
+        {
+            Message f;
+            mq_.wait_and_pop(f);
+            f();
+        }
+        catch ( boost::thread_interrupted& e )
+        {
+              break; //< finish this thread, will be joined in intr_threads_
+        }
+#else
+        try
+        {
+            Message f;
+            if(mq_.try_and_pop(f))
+                f();
+            else
+                boost::this_thread::yield();
+        }
+        catch ( boost::thread_interrupted& e )
+        {
+              break; //< finish this thread, will be joined in intr_threads_
+        }
+
+#endif
     }
-    catch ( boost::thread_interrupted& e )
-    {
-//          std::cout << "> interrupt thread ...\n" << std::flush;
-          break;
-    }
-  }
-//  std::cout << "> ending run()\n" << std::flush;
+
+//  std::cout << "> ending run()" << std::flush;
+
 }
 
 //-----------------------------------------------------------------------------
@@ -166,15 +257,22 @@ boost::shared_ptr<Active> Active::create( size_t nb_threads, size_t qsize )
 
     // attach one thread
 
-    ThreadPtr p( new boost::thread(&Active::run, pao.get()) );
-    pao->threads_[ p->get_id() ] = p;
+    try
+    {
+        ThreadPtr p( new boost::thread(&Active::run, pao.get()) );
+        pao->threads_[ p->get_id() ] = p;
+    }
+    catch(...)
+    {
+        pao.reset();
+        return pao;
+    }
 
     for( size_t i = 1; i < nb_threads; ++i )
     {
         Message add = boost::bind( &Active::add_thread, pao.get() );
         pao->send(add);
     }
-
     pao->qsize( qsize );
 
     return pao;

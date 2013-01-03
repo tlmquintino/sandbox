@@ -18,6 +18,10 @@
 #     (1)--(2)--(3)        (5)
 #                 \--(4b)--/
 #
+#              ---
+#     (c)--(s)-|-- MPI
+#              ---
+#
 
 ### active object with single worker thread
 ### suitable for wrapping around resources that need synchronized access
@@ -32,3 +36,10 @@ target_link_libraries( boost_aop ${Boost_LIBRARIES} )
 add_executable( boost_aop_mt boost_aop_mt.cc shared_queue.h  ActiveMT.h )
 
 target_link_libraries( boost_aop_mt ${Boost_LIBRARIES} )
+
+### active object with futures
+###
+
+add_executable( boost_aop_future boost_aop_future.cc shared_queue.h  ActiveFuture.h )
+
+target_link_libraries( boost_aop_future ${Boost_LIBRARIES} )

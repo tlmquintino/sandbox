@@ -29,6 +29,11 @@ public: // methods
   {
   }
 
+  ~shared_queue()
+  {
+      std::cout << "!! queue size [" << size() << "]" << std::endl;
+  }
+
   bool wait_and_push( T item )
   {
       boost::unique_lock<boost::mutex> lock(m_);
@@ -82,10 +87,28 @@ public: // methods
     data_cond_.notify_one();
   }
 
-  void open( bool o )
+  void open()
+  {
+      boost::unique_lock<boost::mutex> lock(m_);
+      if(!open_)
+          open_ = true;
+  }
+
+  void drain_and_close()
+  {
+      boost::unique_lock<boost::mutex> lock(m_);
+      open_ = false; // don't accept more entries
+      while( !queue_.empty() )
+      {
+        data_cond_.wait(lock);
+      }
+      data_cond_.notify_one();
+  }
+
+  bool is_open()
   {
     boost::lock_guard<boost::mutex> lock(m_);
-    open_ = o;
+    return open_;
   }
 
   bool empty() const

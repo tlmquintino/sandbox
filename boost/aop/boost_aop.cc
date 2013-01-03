@@ -11,7 +11,6 @@
 #include <boost/chrono.hpp>
 #include <boost/ref.hpp>
 
-#include "shared_queue.h"
 #include "ActiveST.h"
 
 //-----------------------------------------------------------------------------
