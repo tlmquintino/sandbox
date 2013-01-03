@@ -23,7 +23,7 @@
 
 //-----------------------------------------------------------------------------
 
-#define RUN_TIME     30 // s
+#define RUN_TIME     10 // s
 #define QUEUE_SIZE  128 // 0 => unlimited
 
 #define N_CONSUMERS 48
@@ -138,14 +138,14 @@ int main()
     rt.interrupt();
     p.interrupt();
 
-    // join all threads
+//    // join all threads
 
-    for( size_t i = 0; i < prod.size(); ++i)
-        prod[i]->join();
+//    for( size_t i = 0; i < prod.size(); ++i)
+//        prod[i]->join();
 
-    p.join();
-    at.join();
-    rt.join();
+//    p.join();
+//    at.join();
+//    rt.join();
 
     std::cout << "> ending main" << std::endl;
 }
