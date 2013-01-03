@@ -6,6 +6,8 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
+#include "shared_queue.h"
+
 //-----------------------------------------------------------------------------
 
 class Active : private boost::noncopyable {
@@ -23,12 +25,6 @@ private: // methods
 
     /// Flags the Active object to finish
     void finish(){ done_ = true; }
-
-    /// Adds one thread
-    void add_thread_impl();
-
-    /// Removes one thread
-    void remove_thread_impl();
 
     /// Keeps executing the messages that are queued
     void run();

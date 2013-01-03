@@ -6,6 +6,8 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
+#include "shared_queue.h"
+
 //-----------------------------------------------------------------------------
 
 typedef boost::function<void()> Message;
