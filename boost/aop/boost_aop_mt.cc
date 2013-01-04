@@ -24,18 +24,18 @@
 
 //-----------------------------------------------------------------------------
 
-#define RUN_TIME           5 // s
-#define QUEUE_SIZE      1024 // 0 => unlimited
+#define RUN_TIME          10 // s
+#define QUEUE_SIZE         0 // 0 => unlimited
 
-#define N_WORKERS         24
-#define N_PRODUCERS       24
+#define N_WORKERS         78
+#define N_PRODUCERS       78
 
 #define DELAY_ADD_THREAD  80 // ms
 #define DELAY_RM_THREAD  100 // ms
 
 #define DELAY_PRINT       75 // ms
 
-#define DELAY_WORK        30 // ms
+#define DELAY_WORK       300 // ms
 
 #define DELAY_PRODUCER   120 // ms
 

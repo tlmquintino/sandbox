@@ -40,9 +40,6 @@ private: // methods
     /// Starts up everything, using run as the thread mainline
     Active();
 
-    /// Flags the Active object to finish
-    void finish();
-
     /// Joins threads no longer used
     void join_threads();
 
@@ -98,18 +95,10 @@ Active::Active(): done_(false)
 
 Active::~Active()
 {
-    std::cout << "Active::~Active()" << std::endl;
-
     std::cout << "> waiting for the remaining tasks...\n" << std::flush;
 
     mq_.drain_and_close();
     done_ = true;
-
-//    // enqueue finish message -- we know this one is the last message on the queue
-//    mq_.push( boost::bind( &Active::finish, this ) );
-
-//    std::cout << "!! threads_.size() " << threads_.size() << "\n" << std::flush;
-//    std::cout << "!! intr_threads_.size() " << intr_threads_.size() << "\n" << std::flush;
 
     //    std::cout << "> waiting for the remaining tasks... ( mq_.size() = " << mq_.size() << " )\n" << std::flush;
 
@@ -137,7 +126,7 @@ bool Active::send( Message msg )
 
 void Active::add_thread()
 {
-    if( mq_.is_open() )
+    if( mq_.is_open() ) //< only add if queue is open, else don't bother
     {
         boost::lock_guard<boost::mutex> lock(m_);
 
@@ -158,14 +147,6 @@ void Active::join_threads()
             i->second->join();
 
     intr_threads_.clear();
-}
-
-//-----------------------------------------------------------------------------
-
-void Active::finish()
-{
-    mq_.drain_and_close(); //< will wait until the queue is empty
-    done_ = true;
 }
 
 //-----------------------------------------------------------------------------
@@ -217,18 +198,6 @@ void Active::run()
 //  std::cout << "> starting run()\n" << std::flush;
     while (!done_)
     {
-#if 0
-        try
-        {
-            Message f;
-            mq_.wait_and_pop(f);
-            f();
-        }
-        catch ( boost::thread_interrupted& e )
-        {
-              break; //< finish this thread, will be joined in intr_threads_
-        }
-#else
         try
         {
             Message f;
@@ -241,12 +210,8 @@ void Active::run()
         {
               break; //< finish this thread, will be joined in intr_threads_
         }
-
-#endif
     }
-
 //  std::cout << "> ending run()" << std::flush;
-
 }
 
 //-----------------------------------------------------------------------------

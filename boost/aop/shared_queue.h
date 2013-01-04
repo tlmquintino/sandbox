@@ -31,7 +31,7 @@ public: // methods
 
   ~shared_queue()
   {
-      std::cout << "!! queue size [" << size() << "]" << std::endl;
+//      std::cout << "!! queue size [" << size() << "]" << std::endl;
   }
 
   bool wait_and_push( T item )
