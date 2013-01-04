@@ -1,5 +1,5 @@
-#ifndef shared_queue_h
-#define shared_queue_h
+#ifndef message_queue_h
+#define message_queue_h
 
 #include <queue>
 #include <mutex>
@@ -8,7 +8,7 @@
 #include <chrono>
 
 template<typename T>
-class shared_queue
+class message_queue
 {
     size_t max_;
 
@@ -16,12 +16,12 @@ class shared_queue
     mutable std::mutex m_;
     std::condition_variable data_cond_;
 
-    shared_queue& operator=(const shared_queue&) = delete;
-    shared_queue(const shared_queue& other) = delete;
+    message_queue& operator=(const message_queue&) = delete;
+    message_queue(const message_queue& other) = delete;
 
 public:
 
-  shared_queue( size_t max = 0 ) : max_(max){}
+  message_queue( size_t max = 0 ) : max_(max){}
 
   void wait_and_push( T item )
   {

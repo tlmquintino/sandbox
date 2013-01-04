@@ -8,10 +8,8 @@
 
 #include <iostream>
 #include <memory>
-#define BOOST_THREAD_VERSION 3
 
-#include <boost/thread/future.hpp>
-#include "ActiveFuture.h"
+#include "ActiveT.h"
 
 //-----------------------------------------------------------------------------
 
@@ -19,24 +17,22 @@
 
 //-----------------------------------------------------------------------------
 
+int times_10( int i )
+{
+    return i * 10;
+}
+
+//-----------------------------------------------------------------------------
+
 int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    boost::promise<int> pi;
-    boost::future<int> fi;
-    fi=pi.get_future();
+    Active<int,int> tener( &times_10 );
 
-    pi.set_value(42);
+    Active<int,int>::promise_ptr pi = tener.send( 20 );
 
-    assert(fi.is_ready());
-    assert(fi.has_value());
-    assert(!fi.has_exception());
-    assert(fi.get_state()==boost::future_state::ready);
-    assert(fi.get()==42);
-
-    std::cout << fi.get() << std::endl;
-
+    assert( pi->get_future().get() == 200 );
 
     std::cout << "> ending main" << std::endl;
 }

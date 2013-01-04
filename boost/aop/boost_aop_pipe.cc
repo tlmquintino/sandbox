@@ -11,10 +11,7 @@
 #include <iostream>
 #include <memory>
 
-#include <boost/chrono.hpp>
-#include <boost/ref.hpp>
-#include <boost/random/mersenne_twister.hpp>
-#include <boost/random/uniform_int_distribution.hpp>
+#include <boost/noncopyable.hpp>
 
 #include "ActiveT.h"
 
@@ -30,23 +27,45 @@
 
 //-----------------------------------------------------------------------------
 
-typedef boost::function< void( int ) > dispatch_t;
+//template < typename M >
+//class Pipe : private boost::noncopyable {
+//public: // methods
+//    Pipe( ActiveT<M> source, ActiveT<M> sink );
+//};
 
-void times_ten( int i )
+
+//-----------------------------------------------------------------------------
+
+int times_ten( int i  )
 {
-    std::cout << "i [" << i << "]" << std::endl;
+   return i*10;
 }
+
+void print( int i )
+{
+    std::cout << i << std::endl;
+}
+
+//template < typename M1, typename R1, typename R2 >
+//void pipe_dispatch( M1 m, boost::function<R1(M1)> f, boost::shared_ptr< boost::promise<R1> > p, Active<R1,R2>& sink )
+//{
+//    p->set_value( f( m ) );
+//    sink.send( p->get_future().get() );
+//}
+
+//-----------------------------------------------------------------------------
 
 int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    boost::shared_ptr< Active<int> > ao( new Active<int>( &times_ten, N_WORKERS, QUEUE_SIZE ) );
+//    Active<int,void> printer( &print );
 
-    for( int i = 0; i < 20; ++i)
-        ao->send(i);
+//    Active<int,int> tener( &times_ten, N_WORKERS, QUEUE_SIZE );
+//    tener.dispatcher( boost::bind( &pipe_dispatch<int,int,void>, _1, _2, _3, boost::ref(printer) ) );
 
-    ao.reset();
+//    for( int i = 0; i < 200; ++i)
+//        tener.send(i);
 
     std::cout << "> ending main" << std::endl;
 }

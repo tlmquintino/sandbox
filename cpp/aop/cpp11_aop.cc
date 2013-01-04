@@ -12,7 +12,7 @@
 #include <thread>
 #include <chrono>
 
-#include "shared_queue.h"
+#include "message_queue.h"
 
 #define HERE  std::cout << "--" << __LINE__ << std::endl;
 
@@ -35,7 +35,7 @@ private: // methods
 
 private: // data
 
-    shared_queue<Message>      mq_;        ///< message queue
+    message_queue<Message>      mq_;        ///< message queue
     bool                       done_;      ///< flag for finishing
     std::thread              thd_;       ///< thread object
 

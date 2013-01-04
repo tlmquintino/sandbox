@@ -9,9 +9,9 @@
 ### active object with single worker thread
 ### suitable for wrapping around resources that need synchronized access
 
-add_executable( cpp11_aop cpp11_aop.cc shared_queue.h )
+add_executable( cpp11_aop cpp11_aop.cc message_queue.h )
 
 ### active object with multiple worker threads
 ### usefull when messages work on data that isn't shared and needs no synchronized access
 
-add_executable( cpp11_aop_mt cpp11_aop_mt.cc shared_queue.h )
+add_executable( cpp11_aop_mt cpp11_aop_mt.cc message_queue.h )

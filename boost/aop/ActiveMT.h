@@ -8,7 +8,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
-#include "shared_queue.h"
+#include "message_queue.h"
 
 //-----------------------------------------------------------------------------
 
@@ -54,7 +54,7 @@ private: // data
     ThreadPool                threads_;       ///< multiple threads object
     ThreadPool                intr_threads_;  ///< list of threads that were interrupted and need to be joined
 
-    shared_queue<Message>     mq_;            ///< message queue
+    message_queue<Message>     mq_;            ///< message queue
 
 public: // methods
 

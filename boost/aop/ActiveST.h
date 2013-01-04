@@ -6,7 +6,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 
-#include "shared_queue.h"
+#include "message_queue.h"
 
 //-----------------------------------------------------------------------------
 
@@ -28,7 +28,7 @@ private: // methods
 
 private: // data
 
-    shared_queue<Message>      mq_;        ///< message queue
+    message_queue<Message>      mq_;        ///< message queue
     bool                       done_;      ///< flag for finishing
     boost::thread              thd_;       ///< thread object
 

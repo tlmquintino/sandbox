@@ -13,7 +13,7 @@
 #include <thread>
 #include <chrono>
 
-#include "shared_queue.h"
+#include "message_queue.h"
 
 //-----------------------------------------------------------------------------
 
@@ -56,7 +56,7 @@ private: // methods
 private: // data
 
     bool                       done_;      ///< flag for finishing
-    shared_queue<Message>      mq_;        ///< message queue
+    message_queue<Message>      mq_;        ///< message queue
     std::vector<std::thread>   threads_;   ///< multiple threads object
 
 public: // methods
