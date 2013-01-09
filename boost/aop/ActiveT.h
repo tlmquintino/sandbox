@@ -14,7 +14,33 @@
 
 //-----------------------------------------------------------------------------
 
-template < typename M, typename R >
+template < typename R >
+struct Dispatcher
+{
+    typedef void result_type;
+    typedef boost::shared_ptr< boost::promise<R> > promise_t;
+    template< typename M >
+    void operator() ( boost::function< R ( M ) > exec, M m, promise_t r )
+    {
+        r->set_value( exec( m ) );
+    }
+};
+
+template <>
+struct Dispatcher<void>
+{
+    typedef void result_type;
+    typedef boost::shared_ptr< boost::promise<void> > promise_t;
+    template< typename M >
+    void operator() ( boost::function< void ( M ) > exec, M m, promise_t r )
+    {
+        exec( m );
+    }
+};
+
+//-----------------------------------------------------------------------------
+
+template < typename M, typename R, typename D = Dispatcher< R > >
 class Active : private boost::noncopyable {
 
 public: // types
@@ -22,21 +48,21 @@ public: // types
     class Exception {};
 
     typedef M message_type;
-    typedef R return_type;
+    typedef R result_type;
+    typedef D dispatcher_type;
 
     typedef typename boost::promise<R>                   promise_type;
     typedef typename boost::shared_ptr< promise_type >   promise_ptr;
     typedef typename boost::future<R>                    future_type;
 
-    typedef boost::function< return_type ( message_type ) > execution_type;
-
-    typedef boost::function< void ( message_type, execution_type, promise_ptr ) > dispatcher_type;
+    typedef boost::function< result_type ( message_type ) > execution_type;
 
 private: // types
 
     typedef boost::function< void () > work_type;
 
     typedef boost::shared_ptr< boost::thread > ThreadPtr;
+
     typedef std::map< boost::thread::id, ThreadPtr > ThreadPool;
 
 private: // data
@@ -46,11 +72,12 @@ private: // data
     bool                      done_;          ///< flag for finishing
 
     execution_type            exec_;          ///< function to handle each message
-    dispatcher_type           dispatcher_;    ///< dispacthes the execution and takes care of promises
 
     ThreadPool                threads_;       ///< multiple threads object
 
     message_queue<work_type>  mq_;            ///< message queue
+
+    dispatcher_type           dispatch_;      ///< dispatcher of tasks
 
 public: // methods
 
@@ -59,27 +86,35 @@ public: // methods
     Active( execution_type x, size_t nb_threads = 1, size_t qsize = 0 ) :
         done_(false),
         exec_(x),
-        dispatcher_( boost::bind( &Active<M,R>::default_dispatch, this, _1, _2, _3 ) ),
-        mq_(qsize)
+        mq_(qsize),
+        dispatch_()
     {
-        try
-        {
-            for( size_t i = 0; i < nb_threads; ++i )
-            {
-                ThreadPtr p( new boost::thread(&Active<M,R>::run, this ) );
-                threads_[ p->get_id() ] = p;
-            }
-        }
-        catch(...)
-        {
-            throw;
-        }
+        spawn_threads(nb_threads);
     }
 
+    /// Constructor
+    /// Starts up everything, using run as the thread mainline
+    Active( execution_type x, dispatcher_type d, size_t nb_threads = 1, size_t qsize = 0 ) :
+        done_(false),
+        exec_(x),
+        mq_(qsize),
+        dispatch_(d)
+    {
+        spawn_threads(nb_threads);
+    }
 
     /// Destructor
     /// Enqueue done message and wait for queue to drain
-    virtual ~Active();
+    virtual ~Active()
+    {
+        mq_.drain_and_close();
+        done_ = true;
+
+        // wait for all threads still processing queue messages to exit normally
+        for( ThreadPool::iterator i = threads_.begin(); i != threads_.end(); ++i )
+            if( i->second->joinable() )
+                i->second->join();
+    }
 
     /// Enqueue a message
     promise_ptr send( M msg )
@@ -88,10 +123,10 @@ public: // methods
 
         promise_ptr p ( new promise_type() );
 
-        work_type w = boost::bind( dispatcher_, msg, exec_, p );
+        work_type w = boost::bind( dispatch_, exec_, msg, p );
 
         if( ! mq_.wait_and_push( w ) )
-            throw Active<M,R>::Exception();
+            throw Active<M,R,D>::Exception();
 
         return p;
     }
@@ -105,17 +140,22 @@ public: // methods
     /// sets the maximum queue size
     void qsize( const size_t& s ) { mq_.max_size(s); }
 
-    void dispatcher( dispatcher_type d )
-    {
-        boost::lock_guard<boost::mutex> lock(m_);
-        dispatcher_ = d;
-    }
-
 private: // methods
 
-    void default_dispatch( message_type m, execution_type exec, promise_ptr p )
+    void spawn_threads( size_t nb_threads )
     {
-        p->set_value( exec( m ) );
+        try
+        {
+            for( size_t i = 0; i < nb_threads; ++i )
+            {
+                ThreadPtr p( new boost::thread(&Active<M,R,D>::run, this ) );
+                threads_[ p->get_id() ] = p;
+            }
+        }
+        catch(...)
+        {
+            throw;
+        }
     }
 
     void run()
@@ -141,20 +181,6 @@ private: // methods
     }
 
 };
-
-//-----------------------------------------------------------------------------
-
-template < typename M, typename R >
-Active<M,R>::~Active()
-{
-    mq_.drain_and_close();
-    done_ = true;
-
-    // wait for all threads still processing queue messages to exit normally
-    for( ThreadPool::iterator i = threads_.begin(); i != threads_.end(); ++i )
-        if( i->second->joinable() )
-            i->second->join();
-}
 
 //-----------------------------------------------------------------------------
 

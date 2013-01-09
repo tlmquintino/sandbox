@@ -46,12 +46,32 @@ void print( int i )
     std::cout << i << std::endl;
 }
 
-//template < typename M1, typename R1, typename R2 >
-//void pipe_dispatch( M1 m, boost::function<R1(M1)> f, boost::shared_ptr< boost::promise<R1> > p, Active<R1,R2>& sink )
-//{
-//    p->set_value( f( m ) );
-//    sink.send( p->get_future().get() );
-//}
+
+template < typename AO >
+class PipeDispatcher {
+
+public: // methods
+
+    typedef typename AO::result_type   pipe_output_t;
+    typedef typename AO::message_type  pipe_input_t;
+
+    typedef void result_type;
+    typedef boost::shared_ptr< boost::promise<pipe_input_t> > promise_t;
+
+    PipeDispatcher( AO& o ) : sink_(o) {}
+
+    template< typename M >
+    void operator() ( boost::function< pipe_input_t ( M ) > exec, M m, promise_t p )
+    {
+        p->set_value( exec( m ) );
+        sink_.send( p->get_future().get() );
+    }
+
+private: // members
+
+    AO& sink_;
+
+};
 
 //-----------------------------------------------------------------------------
 
@@ -59,13 +79,14 @@ int main()
 {
     std::cout << "> starting main" << std::endl;
 
-//    Active<int,void> printer( &print );
+    typedef Active<int,void> IntSink;
 
-//    Active<int,int> tener( &times_ten, N_WORKERS, QUEUE_SIZE );
-//    tener.dispatcher( boost::bind( &pipe_dispatch<int,int,void>, _1, _2, _3, boost::ref(printer) ) );
+    IntSink printer( &print );
 
-//    for( int i = 0; i < 200; ++i)
-//        tener.send(i);
+    Active< int, int, PipeDispatcher<IntSink> > tener( &times_ten, printer, N_WORKERS, QUEUE_SIZE );
+
+    for( int i = 0; i < 200; ++i)
+        tener.send(i);
 
     std::cout << "> ending main" << std::endl;
 }
