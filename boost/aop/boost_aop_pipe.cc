@@ -27,15 +27,6 @@
 
 //-----------------------------------------------------------------------------
 
-//template < typename M >
-//class Pipe : private boost::noncopyable {
-//public: // methods
-//    Pipe( ActiveT<M> source, ActiveT<M> sink );
-//};
-
-
-//-----------------------------------------------------------------------------
-
 int times_ten( int i  )
 {
    return i*10;
@@ -46,32 +37,50 @@ void print( int i )
     std::cout << i << std::endl;
 }
 
+template < typename T1, typename T2 >
+class Pipe : private boost::noncopyable {
 
-template < typename AO >
-class PipeDispatcher {
+public: // types
+
+    typedef typename T1::message_type  message_type;
+    typedef typename T2::result_type   result_type;
 
 public: // methods
 
-    typedef typename AO::result_type   pipe_output_t;
-    typedef typename AO::message_type  pipe_input_t;
-
-    typedef void result_type;
-    typedef boost::shared_ptr< boost::promise<pipe_input_t> > promise_t;
-
-    PipeDispatcher( AO& o ) : sink_(o) {}
-
-    template< typename M >
-    void operator() ( boost::function< pipe_input_t ( M ) > exec, M m, promise_t p )
+    Pipe( T1& source, T2& sink) :
+        source_(source),
+        sink_(sink)
     {
-        p->set_value( exec( m ) );
-        sink_.send( p->get_future().get() );
+        source_.dispatcher( make_pipe_to( sink_ ) );
+    }
+
+    void send( message_type msg )
+    {
+        source_.send(msg);
     }
 
 private: // members
 
-    AO& sink_;
+    T1& source_;
+    T2& sink_;
 
 };
+
+template < typename T1, typename T2 >
+Pipe<T1,T2> make_pipe( T1& source, T2& sink )
+{
+    return Pipe<T1,T2>(source,sink);
+}
+
+//-----------------------------------------------------------------------------
+
+/// @note Pipe solution between Active objects
+///
+///       Involves changing the dispatcher in each upstream AOP
+///       Pipes are typed source_type to sink_type
+///       Pipes don't return their result
+
+///       Pipes aren't objects themselves -- SOLVED
 
 //-----------------------------------------------------------------------------
 
@@ -79,14 +88,16 @@ int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    typedef Active<int,void> IntSink;
+    typedef Active<int,void> SinkInt;
+    typedef Active<int,int>  ProcessInt;
 
-    IntSink printer( &print );
+    SinkInt printer( &print );
+    ProcessInt tener( &times_ten, N_WORKERS, QUEUE_SIZE );
 
-    Active< int, int, PipeDispatcher<IntSink> > tener( &times_ten, printer, N_WORKERS, QUEUE_SIZE );
+    Pipe<ProcessInt,SinkInt> p (tener,printer);
 
-    for( int i = 0; i < 200; ++i)
-        tener.send(i);
+    for( int i = 0; i < 200000; ++i)
+        p.send(i);
 
     std::cout << "> ending main" << std::endl;
 }
