@@ -179,6 +179,7 @@ private: // methods
 
     void spawn_threads( size_t nb_threads )
     {
+        boost::lock_guard<boost::mutex> lock(m_);
         try
         {
             for( size_t i = 0; i < nb_threads; ++i )

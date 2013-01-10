@@ -80,7 +80,11 @@ Pipe<T1,T2> make_pipe( T1& source, T2& sink )
 ///       Pipes are typed source_type to sink_type
 ///       Pipes don't return their result
 
+///       Pipes should be ActiveObjects themselves
+///          - with special dispatch functions to send the messages forward
+
 ///       Pipes aren't objects themselves -- SOLVED
+
 
 //-----------------------------------------------------------------------------
 
