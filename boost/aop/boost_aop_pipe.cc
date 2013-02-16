@@ -14,6 +14,7 @@
 #include <boost/noncopyable.hpp>
 
 #include "ActiveT.h"
+#include "Pipe1.h"
 
 //-----------------------------------------------------------------------------
 
@@ -37,71 +38,26 @@ void print( int i )
     std::cout << i << std::endl;
 }
 
-template < typename T1, typename T2 >
-class Pipe : private boost::noncopyable {
-
-public: // types
-
-    typedef typename T1::message_type  message_type;
-    typedef typename T2::result_type   result_type;
-
-public: // methods
-
-    Pipe( T1& source, T2& sink) :
-        source_(source),
-        sink_(sink)
-    {
-        source_.dispatcher( make_pipe_to( sink_ ) );
-    }
-
-    void send( message_type msg )
-    {
-        source_.send(msg);
-    }
-
-private: // members
-
-    T1& source_;
-    T2& sink_;
-
-};
-
-template < typename T1, typename T2 >
-Pipe<T1,T2> make_pipe( T1& source, T2& sink )
-{
-    return Pipe<T1,T2>(source,sink);
-}
-
-//-----------------------------------------------------------------------------
-
-/// @note Pipe solution between Active objects
-///
-///       Involves changing the dispatcher in each upstream AOP
-///       Pipes are typed source_type to sink_type
-///       Pipes don't return their result
-
-///       Pipes should be ActiveObjects themselves
-///          - with special dispatch functions to send the messages forward
-
-///       Pipes aren't objects themselves -- SOLVED
-
-
 //-----------------------------------------------------------------------------
 
 int main()
 {
     std::cout << "> starting main" << std::endl;
 
-    typedef Active<int,void> SinkInt;
-    typedef Active<int,int>  ProcessInt;
+    typedef Active<int,int>   IntToInt;
+    typedef Active<int,void>  IntToVoid;
 
-    SinkInt printer( &print );
-    ProcessInt tener( &times_ten, N_WORKERS, QUEUE_SIZE );
+    typedef Pipe1<int,int,void> PipeIntToVoid;
 
-    Pipe<ProcessInt,SinkInt> p (tener,printer);
+    IntToInt   tener( &times_ten, N_WORKERS, QUEUE_SIZE );
+    IntToVoid  printer( &print );
 
-    for( int i = 0; i < 200000; ++i)
-        p.send(i);
+    boost::shared_ptr< PipeIntToVoid > p ( new PipeIntToVoid(tener,printer) );
+
+    for( int i = 0; i < 2000; ++i)
+        p->send(i);
+
+    p.reset();
 
     std::cout << "> ending main" << std::endl;
 }

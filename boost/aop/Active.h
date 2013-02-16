@@ -1,5 +1,5 @@
-#ifndef ActiveT_h
-#define ActiveT_h
+#ifndef Active_h
+#define Active_h
 
 #define BOOST_THREAD_VERSION 3
 
@@ -14,15 +14,87 @@
 
 //-----------------------------------------------------------------------------
 
+template < typename M >
+class IActive : private boost::noncopyable {
+
+public: // types
+
+    typedef boost::shared_ptr< IActive<M> > Ptr;
+
+    typedef M message_type;
+
+public: // interface
+
+    virtual void send( M msg ) = 0;
+
+};
+
+template <>
+class IActive<void> : private boost::noncopyable {
+
+public: // types
+
+    typedef boost::shared_ptr< IActive<void> > Ptr;
+
+public: // interface
+
+};
+
+//-----------------------------------------------------------------------------
+
+template < typename M >
+class Pipe : public IActive<M> {
+
+public: // types
+
+    typedef boost::shared_ptr< Pipe<M> > Ptr;
+
+    typedef M message_type;
+
+public: // interface
+
+    virtual void send( M msg )
+    {
+        boost::lock_guard<boost::mutex> lock(m_);
+        for( size_t i = 0; i < sinks_.size(); ++i )
+            sinks_[i]->send( msg );
+    }
+
+    void add_sink( typename IActive<M>::Ptr sink )
+    {
+        boost::lock_guard<boost::mutex> lock(m_);
+        sinks_.push_back(sink);
+    }
+
+protected: // data
+
+    mutable boost::mutex      m_;           ///< mutex for locking changes
+
+    std::vector< typename IActive<M>::Ptr > sinks_;  ///< pipe destinations
+};
+
+//-----------------------------------------------------------------------------
+
+namespace detail {
+
 template < typename R >
 struct Dispatcher
 {
     typedef void result_type;
     typedef boost::shared_ptr< boost::promise<R> > promise_t;
+
     template< typename M >
-    void operator() ( boost::function< R ( M ) > exec, M m, promise_t r )
+    void operator() ( typename IActive<R>::Ptr p, boost::function< R ( M ) > exec, M m, promise_t pr )
     {
-        r->set_value( exec( m ) );
+        R r = exec( m );
+        pr->set_value( r );
+        p->send( r );
+    }
+
+    template< typename M >
+    void operator() ( typename IActive<R>::Ptr p, boost::function< R ( M ) > exec, M m )
+    {
+        p->send( exec( m ) );
     }
 };
 
@@ -31,23 +103,21 @@ struct Dispatcher<void>
 {
     typedef void result_type;
     typedef boost::shared_ptr< boost::promise<void> > promise_t;
+
     template< typename M >
-    void operator() ( boost::function< void ( M ) > exec, M m, promise_t r )
+    void operator() ( typename IActive<void>::Ptr p, boost::function< void ( M ) > exec, M m, promise_t pr )
+    {
+        exec( m );
+    }
+
+    template< typename M >
+    void operator() ( typename IActive<void>::Ptr p, boost::function< void ( M ) > exec, M m )
     {
         exec( m );
     }
 };
 
-//-----------------------------------------------------------------------------
-
-template < typename M >
-class IActive : private boost::noncopyable {
-
-public: // interface
-
-    virtual void send( M msg ) = 0;
-
-};
+}
 
 //-----------------------------------------------------------------------------
 
@@ -55,6 +125,8 @@ template < typename M, typename R >
 class Active : public IActive<M> {
 
 public: // types
+
+    typedef boost::shared_ptr< Active<M,R> > Ptr;
 
     class Exception {};
 
@@ -67,7 +139,7 @@ public: // types
 
     typedef boost::function< result_type ( message_type ) > execution_type;
 
-    typedef boost::function< void ( execution_type, message_type, promise_ptr ) > dispatcher_type;
+    typedef typename IActive<result_type>::Ptr  pipe_type;
 
 protected: // types
 
@@ -76,6 +148,8 @@ protected: // types
     typedef boost::shared_ptr< boost::thread > thread_ptr;
 
     typedef std::map< boost::thread::id, thread_ptr > ThreadPool;
+
+    typedef typename detail::Dispatcher<result_type> dispatcher_type;
 
 protected: // data
 
@@ -91,18 +165,20 @@ protected: // data
 
     dispatcher_type           dispatch_;      ///< dispatcher of tasks
 
+    pipe_type                 pipe_;          ///< possible holds a pipe
+
 public: // methods
 
     /// Constructor
     /// Starts up everything, using run as the thread mainline
     Active( execution_type x,
             size_t nb_threads = 1,
-            size_t qsize = 0,
-            dispatcher_type d = Dispatcher<result_type>() ) :
+            size_t qsize = 0 ) :
         done_(false),
         exec_(x),
         mq_(qsize),
-        dispatch_( d )
+        dispatch_(),
+        pipe_()
     {
         spawn_threads(nb_threads);
     }
@@ -123,13 +199,11 @@ public: // methods
     /// Enqueue a message
     virtual void send( message_type msg )
     {
-        promise_ptr p ( new promise_type() );
-
         boost::unique_lock<boost::mutex> lock(m_);
 
-        work_type w = boost::bind( dispatch_, exec_, msg, p );
+        work_type w = boost::bind( dispatch_, pipe_, exec_, msg );
 
-        lock.unlock(); // unlock here, not to block in case we wait before pushing
+        lock.unlock();
 
         if( ! mq_.wait_and_push( w ) )
             throw Active<M,R>::Exception();
@@ -141,19 +215,18 @@ public: // methods
     {
         boost::unique_lock<boost::mutex> lock(m_);
 
-        work_type w = boost::bind( dispatch_, exec_, msg, p );
+        work_type w = boost::bind( dispatch_, pipe_, exec_, msg, p );
 
-        lock.unlock(); // unlock here, not to block in case we wait before pushing
+        lock.unlock();
 
         if( ! mq_.wait_and_push( w ) )
             throw Active<M,R>::Exception();
     }
 
-    /// Sets the dispatcher
-    void dispatcher( dispatcher_type d )
+    void pipe( const pipe_type& p )
     {
         boost::lock_guard<boost::mutex> lock(m_);
-        dispatch_ = d;
+        return pipe_.reset(p);
     }
 
     /// @returns the nb worker threads
@@ -169,10 +242,11 @@ public: // methods
     /// sets the maximum queue size
     void qsize( const size_t& s ) { mq_.max_size(s); }
 
-//    /// Operator to pipe Active objects to other Active objects
-//    template< typename T1, typename T2 >
-//    friend Active< typename T1::message_type, typename T2::result_type >
-//    operator| ( T1& source, T2& sink );
+    /// Factory method
+    static Active<M,R>::Ptr create( execution_type x, size_t nb_threads = 1, size_t qsize = 0 )
+    {
+        return Active<M,R>::Ptr( new Active<M,R>(x,nb_threads,qsize) );
+    }
 
 protected: // methods
 
@@ -221,11 +295,21 @@ protected: // methods
 
 //-----------------------------------------------------------------------------
 
-// template< typename T1, typename T2 >
-// Active< typename T1::message_type, typename T2::result_type >
-// operator| ( T1& source, T2& sink )
-// {
-// }
+/// Operator to pipe Active objects to other Active objects
+template< typename T1, typename T2 >
+typename IActive<typename T2::message_type>::Ptr
+operator| ( boost::shared_ptr<T1> source, boost::shared_ptr<T2> sink )
+{
+    typedef Pipe< typename T2::message_type > pipe_t;
+
+    pipe_t* pp = new pipe_t();
+    pp->add_sink(sink);
+
+    typename T1::pipe_type p ( pp );
+    source->pipe( p );
+
+    return boost::dynamic_pointer_cast< typename IActive<typename T2::message_type>::Ptr >(sink);
+}
 
 //-----------------------------------------------------------------------------
 

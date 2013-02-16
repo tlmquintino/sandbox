@@ -40,9 +40,17 @@ target_link_libraries( boost_aop_mt ${Boost_LIBRARIES} )
 #                 \--(4b)--/
 #
 
-add_executable( boost_aop_pipe boost_aop_pipe.cc message_queue.h  ActiveT.h )
+add_executable( boost_aop_pipe boost_aop_pipe.cc message_queue.h  ActiveT.h  Pipe1.h )
 
 target_link_libraries( boost_aop_pipe ${Boost_LIBRARIES} )
+
+add_executable( boost_aop_pipe_v2 boost_aop_pipe_v2.cc message_queue.h  ActiveT.h Pipe2.h )
+
+target_link_libraries( boost_aop_pipe_v2 ${Boost_LIBRARIES} )
+
+add_executable( boost_aop_pipe_v3 boost_aop_pipe_v3.cc message_queue.h  Active.h )
+
+target_link_libraries( boost_aop_pipe_v3 ${Boost_LIBRARIES} )
 
 ### active object with futures
 ###
