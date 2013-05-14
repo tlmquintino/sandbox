@@ -12,5 +12,6 @@ endif()
 add_subdirectory( auto )
 add_subdirectory( thread )
 add_subdirectory( aop )
+add_subdirectory( monads )
 
 endif()
