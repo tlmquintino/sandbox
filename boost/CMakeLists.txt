@@ -17,8 +17,9 @@ if( ENABLE_BOOST )
 	add_subdirectory( asio     )
 	add_subdirectory( optional )
 	add_subdirectory( thread   )
-	#	add_subdirectory( aop )
-	add_subdirectory( monads )
+	# add_subdirectory( aop )
+	#	add_subdirectory( monads )
+	add_subdirectory( expressions )
 
   endif()
 
