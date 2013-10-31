@@ -31,17 +31,22 @@ public:
 
     typedef boost::shared_ptr<Exp> Ptr;
 
+    enum Type { SCALAR, VECTOR, OP };
+
+    virtual Exp::Type type() const { return OP; }
+
     virtual ~Exp() {}
     virtual VarPtr eval() = 0;
-
-    virtual bool isVar()  const { return false; }
-    virtual bool scalar() const { return false; }
-    virtual bool vector() const { return false; }
 
     ExpPtr self() { return shared_from_this(); }
 
     template< typename T >
     boost::shared_ptr<T> as() { return boost::dynamic_pointer_cast<T,Exp>( shared_from_this() ); }
+
+    bool isVar() { Type t = type(); return ( t == SCALAR || t == VECTOR ); }
+    bool isOp() { return type() == OP; }
+    bool isScalar() { return type() == SCALAR; }
+    bool isVector() { return type() == VECTOR; }
 
 };
 
@@ -53,8 +58,6 @@ public:
     virtual VarPtr eval() { return boost::static_pointer_cast<Var>( shared_from_this() ); }
 
     virtual size_t size() const = 0;
-
-    virtual bool isVar() const { return true; }
 
     friend std::ostream& operator<<( std::ostream& os, const Var& v) { v.print(os); return os; }
 
@@ -71,7 +74,7 @@ public:
     Scalar( const scalar_t& v ) : v_(v) {}
 
     virtual size_t size() const { return 1; }
-    virtual bool scalar() const { return true; }
+    virtual Exp::Type type() const { return Exp::SCALAR; }
 
     scalar_t value() const { return v_; }
 
@@ -97,10 +100,11 @@ public:
     Vector( const size_t& s, const scalar_t& v = scalar_t() ) : v_(s,v) {}
     Vector( const storage_t& v ) : v_(v) {}
 
+    virtual Exp::Type type() const { return Exp::VECTOR; }
+
 //    virtual ~Vector() { std::cout << "deleting Vector" << std::endl; }
 
     virtual size_t size() const { return v_.size(); }
-    virtual bool vector() const { return true; }
 
     /// returns a copy of the internal vector
     storage_t value() const { return v_; }
@@ -132,10 +136,10 @@ public:
 
         VarPtr eval()
         {
-            bool lhs_scalar = lhs_->scalar();
-            bool lhs_vector = lhs_->vector();
-            bool rhs_scalar = rhs_->scalar();
-            bool rhs_vector = rhs_->vector();
+            bool lhs_scalar = lhs_->isScalar();
+            bool lhs_vector = lhs_->isVector();
+            bool rhs_scalar = rhs_->isScalar();
+            bool rhs_vector = rhs_->isVector();
 
             if( lhs_scalar && rhs_scalar )
                 return maths::scalar( lhs_->as<Scalar>()->value() + rhs_->as<Scalar>()->value() );
@@ -226,10 +230,10 @@ public:
 
         VarPtr eval()
         {
-            bool lhs_scalar = lhs_->scalar();
-            bool lhs_vector = lhs_->vector();
-            bool rhs_scalar = rhs_->scalar();
-            bool rhs_vector = rhs_->vector();
+            bool lhs_scalar = lhs_->isScalar();
+            bool lhs_vector = lhs_->isVector();
+            bool rhs_scalar = rhs_->isScalar();
+            bool rhs_vector = rhs_->isVector();
 
             if( lhs_scalar && rhs_scalar )
                 return maths::scalar( lhs_->as<Scalar>()->value() * rhs_->as<Scalar>()->value() );
