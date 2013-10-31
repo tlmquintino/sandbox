@@ -15,25 +15,50 @@ typedef double scalar_t;
 
 //-----------------------------------------------------------------------------
 
-class Var : public boost::enable_shared_from_this<Var>,
+class Var;
+class Exp;
+
+typedef boost::shared_ptr<Var>  VarPtr;
+typedef boost::shared_ptr<Exp> ExpPtr;
+
+//-----------------------------------------------------------------------------
+
+class Exp : public boost::enable_shared_from_this<Exp>,
             private boost::noncopyable {
 public:
 
-    typedef boost::shared_ptr<Var> Ptr;
+    typedef boost::shared_ptr<Exp> Ptr;
 
-    virtual size_t size() const = 0;
+    virtual ~Exp() {}
+    virtual VarPtr eval() = 0;
+
+    virtual bool isVar()  const { return false; }
     virtual bool scalar() const { return false; }
     virtual bool vector() const { return false; }
-//    virtual bool tensor() const { return false; }
+
+    ExpPtr self() { return shared_from_this(); }
+
+    template< typename T >
+    boost::shared_ptr<T> as() { return boost::dynamic_pointer_cast<T,Exp>( shared_from_this() ); }
+
+};
+
+//-----------------------------------------------------------------------------
+
+class Var : public Exp {
+public:
+
+    virtual VarPtr eval() { return boost::static_pointer_cast<Var>( shared_from_this() ); }
+
+    virtual size_t size() const = 0;
+
+    virtual bool isVar() const { return true; }
 
     friend std::ostream& operator<<( std::ostream& os, const Var& v) { v.print(os); return os; }
 
-    friend std::ostream& operator<<( std::ostream& os, const Var::Ptr& v) { v->print(os); return os; }
+    friend std::ostream& operator<<( std::ostream& os, const VarPtr& v) { v->print(os); return os; }
 
     virtual std::ostream& print( std::ostream& ) const = 0;
-
-    template< typename T > boost::shared_ptr<T> as() { return boost::dynamic_pointer_cast<T,Var>( shared_from_this() ); }
-
 };
 
 //-----------------------------------------------------------------------------
@@ -50,7 +75,7 @@ public:
 
     virtual std::ostream& print( std::ostream& o ) const { return o << v_; }
 
-    static Var::Ptr make( const scalar_t& v ) { return Var::Ptr( new Scalar(v) ); }
+    static VarPtr make( const scalar_t& v ) { return VarPtr( new Scalar(v) ); }
 
 protected:
     scalar_t v_;
@@ -78,7 +103,7 @@ public:
 
     virtual std::ostream& print( std::ostream& o ) const { std::copy(v_.begin(),v_.end(), std::ostream_iterator<Vector::value_t>(o, " ")); return o; }
 
-    static Var::Ptr make( const size_t& s, const scalar_t& v = scalar_t() ) { return Var::Ptr( new Vector(s,v) ); }
+    static VarPtr make( const size_t& s, const scalar_t& v = scalar_t() ) { return VarPtr( new Vector(s,v) ); }
 
 protected:
     storage_t v_;
@@ -86,47 +111,48 @@ protected:
 
 //-----------------------------------------------------------------------------
 
-class Expr : public boost::enable_shared_from_this<Expr>,
-             private boost::noncopyable {
-public:
-
-    typedef boost::shared_ptr<Expr> Ptr;
-
-    virtual ~Expr() {}
-    virtual Var::Ptr eval() = 0;
-
-};
-
-//-----------------------------------------------------------------------------
-
 class Add {
 public:
 
-    struct XpVarVar : public Expr
+    struct Op : public Exp
     {
-        Var::Ptr l_;
-        Var::Ptr r_;
+        ExpPtr lhs_;
+        ExpPtr rhs_;
 
-        XpVarVar( Var::Ptr lhs, Var::Ptr rhs ) : l_(lhs), r_(rhs) {}
+        Op( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
 
-        Var::Ptr eval()
+        VarPtr eval()
         {
-            bool lhs_scalar = l_->scalar();
-            bool rhs_scalar = r_->scalar();
+            bool lhs_scalar = lhs_->scalar();
+            bool lhs_vector = lhs_->vector();
+            bool rhs_scalar = rhs_->scalar();
+            bool rhs_vector = rhs_->vector();
 
-            if( lhs_scalar && rhs_scalar ) // both scalar
-                return Scalar::make( l_->as<Scalar>()->value() + r_->as<Scalar>()->value() );
-            if( lhs_scalar ) // rhs is vector
-                return eval_add_vector_scalar( l_, r_ );
-            if( rhs_scalar ) // lhs is vector
-                return eval_add_vector_scalar( r_, l_ );
+            if( lhs_scalar && rhs_scalar )
+                return Scalar::make( lhs_->as<Scalar>()->value() + rhs_->as<Scalar>()->value() );
+            if( lhs_scalar && rhs_vector )
+                return eval_add_vector_scalar( lhs_, rhs_ );
+            if( lhs_vector && rhs_scalar )
+                return eval_add_vector_scalar( rhs_, lhs_ );
+            if( lhs_vector && rhs_vector )
+                return eval_add_vector_vector( rhs_, lhs_ );
 
-            return eval_add_vector_vector( r_, l_ );
+            assert( ! lhs_->isVar() || ! rhs_->isVar() ); // either one is not a Var
+
+            /// @todo optimize this dispatch by looking into possible reduction of temporaries
+
+            if( ! lhs_->isVar() )
+                lhs_ = lhs_->eval(); /// @note creates temporary
+
+            if( ! rhs_->isVar() )
+                rhs_ = rhs_->eval(); /// @note creates temporary
+
+            return Op( lhs_, rhs_ ).eval();
         }
 
     private:
 
-        Var::Ptr eval_add_vector_scalar( Var::Ptr& s, Var::Ptr& v )
+        VarPtr eval_add_vector_scalar( ExpPtr& s, ExpPtr& v )
         {
             scalar_t lhs = s->as<Scalar>()->value();
             Vector::storage_t& rhs = v->as<Vector>()->ref_value();
@@ -137,10 +163,10 @@ public:
             for( size_t i = 0; i < rv.size(); ++i )
                 rv[i] = lhs + rhs[i];
 
-            return Var::Ptr(res);
+            return VarPtr(res);
         }
 
-        Var::Ptr eval_add_vector_vector( Var::Ptr& v1, Var::Ptr& v2 )
+        VarPtr eval_add_vector_vector( ExpPtr& v1, ExpPtr& v2 )
         {
             Vector::storage_t& lhs = v1->as<Vector>()->ref_value();
             Vector::storage_t& rhs = v2->as<Vector>()->ref_value();
@@ -153,35 +179,17 @@ public:
             for( size_t i = 0; i < rv.size(); ++i )
                 rv[i] = lhs[i] + rhs[i];
 
-            return Var::Ptr(res);
+            return VarPtr(res);
         }
 
     };
 
-//    struct XpVarExpr : public Expr
-//    {
-//        Var::Ptr l_;
-//        Expr::Ptr r_;
-//        XpVarExpr( Var::Ptr lhs, Expr::Ptr rhs ) : l_(lhs), r_(rhs) {}
-//        Var::Ptr eval()
-//        {
-//            if( l_->scalar() ) // scalar op expr
-//            {
-//                scalar_t lhs = s->as<Scalar>()->value();
-
-//            }
-//            else // vector op expr
-//            {
-
-//            }
-//        }
-
-//    };
-
     Add() {}
 
-    Expr::Ptr operator() ( Var::Ptr l, Var::Ptr  r ) { return Expr::Ptr( new Add::XpVarVar(l,r) ); }
-//    Expr::Ptr operator() ( Var::Ptr l, Expr::Ptr r ) { return Expr::Ptr( new Add::XpVarExpr(l,r) ); }
+    ExpPtr operator() ( ExpPtr l, ExpPtr r ) { return ExpPtr( new Add::Op(l,r) ); }
+    ExpPtr operator() ( Exp&   l, ExpPtr r ) { return ExpPtr( new Add::Op(l.self(),r) ); }
+    ExpPtr operator() ( ExpPtr l, Exp&   r ) { return ExpPtr( new Add::Op(l,r.self()) ); }
+    ExpPtr operator() ( Exp&   l, Exp&   r ) { return ExpPtr( new Add::Op(l.self(),r.self()) ); }
 
 };
 
@@ -189,37 +197,44 @@ public:
 
 int main()
 {
-    Var::Ptr a = Scalar::make( 2. );
-    Var::Ptr b = Vector::make( 10, 5. );
-    Var::Ptr c = Scalar::make( 4. );
+    VarPtr a = Scalar::make( 2. );
+    VarPtr c = Scalar::make( 4. );
+
+    VarPtr v1 = Vector::make( 10, 5. );
+    VarPtr v2 = Vector::make( 10, 7. );
 
     std::cout << "a = " << a << std::endl;
-    std::cout << "b = " << b << std::endl;
     std::cout << "c = " << c << std::endl;
+    std::cout << "v1 = " << v1 << std::endl;
+    std::cout << "v2 = " << v2 << std::endl;
 
     // scalar + scalar
 
-    Var::Ptr r = Add()( a , c )->eval();
+    VarPtr r = Add()( a , c )->eval();
     std::cout << "r = " <<  r << std::endl;
 
     // scalar + vector
 
-    Var::Ptr r2 = Add()( a , b )->eval();
+    VarPtr r2 = Add()( a , v1 )->eval();
     std::cout << "r2 = " << r2 << std::endl;
 
     // vector + scalar
 
-    std::cout << "r2 = " << Add()( b , a )->eval() << std::endl;
+    std::cout << "r2 = " << Add()( v1 , a )->eval() << std::endl;
 
     // vector + vector
 
-    Expr::Ptr add = Add()( b, b );                // look, we can store expressions
-    Var::Ptr r3 =  add->eval();                   // and evaluate them later...
-    std::cout << "r3 = " << r3 << std::endl;
+    std::cout << "r3 = " << Add()( *v1, *v2 )->eval() << std::endl;
+
+    // vector + vector
+
+    ExpPtr add = Add()( v1, v1 );                // look, we can store expressions
+    VarPtr r4 =  add->eval();                  // and evaluate them later...
+    std::cout << "r4 = " << r4 << std::endl;
 
     // vector + expression
 
-//    std::cout << "r4 = " << Add()( b , Add()( b, b ) ) << std::endl;
+    std::cout << "r5 = " << Add()( Add()( v1, v2 ) , Add()( v1, v2 ) )->eval() << std::endl;
 
 #if 0
 
@@ -230,7 +245,7 @@ int main()
 
     FieldSet r = Add()( f1, f2 ).eval();
 
-    Expr r = Add()( f1, f2 );
+    Exp r = Add()( f1, f2 );
 
     FieldSet r2 = Regrid( '0.5/0.5' )( r )->eval();
 
