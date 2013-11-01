@@ -16,11 +16,13 @@
 
 namespace maths {
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
+
 
 typedef double scalar_t;
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
+
 
 class Var;
 class Exp;
@@ -28,7 +30,8 @@ class Exp;
 typedef boost::shared_ptr<Var>  VarPtr;
 typedef boost::shared_ptr<Exp> ExpPtr;
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
+
 
 class Exp : public boost::enable_shared_from_this<Exp>,
             private boost::noncopyable {
@@ -55,19 +58,8 @@ public:
 
 };
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
-/// Dispatcher of binary operations
-
-
-typedef boost::tuple< Exp::Type, Exp::Type, std::string > binop_key_t;
-typedef boost::function< VarPtr ( ExpPtr& , ExpPtr& ) > binop_value_t;
-
-typedef std::map< binop_key_t, binop_value_t > binop_map_t;
-
-static binop_map_t binop_dispatcher;
-
-//-----------------------------------------------------------------------------
 
 class Var : public Exp {
 public:
@@ -83,7 +75,8 @@ public:
     virtual std::ostream& print( std::ostream& ) const = 0;
 };
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
+
 
 class Scalar : public Var {
 public:
@@ -106,7 +99,8 @@ protected:
 
 VarPtr scalar( const scalar_t& s  ) { return VarPtr( new Scalar(s) ); }
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
+
 
 class Vector : public Var {
 public:
@@ -138,68 +132,93 @@ protected:
 VarPtr vector( const size_t& sz, const scalar_t& v = scalar_t()  ) { return VarPtr( new Vector(sz,v) ); }
 VarPtr vector( const Vector::storage_t& v  ) { return VarPtr( new Vector(v) ); }
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
-class ExpOp : public Exp
-{
+
+class ExpOp : public Exp {
+public:
 
     virtual Exp::Type type() const { return Exp::OP; }
     virtual std::string opName() const = 0;
 
 };
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
+
+class BinOp : public ExpOp {
+public:
+
+    typedef boost::tuple< Exp::Type, Exp::Type, std::string > key_t;
+    typedef boost::function< VarPtr ( ExpPtr& , ExpPtr& ) >   value_t;
+    typedef std::map< key_t, value_t > dispatcher_t;
+
+    BinOp( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
+
+    VarPtr eval()
+    {
+        BinOp::key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
+
+        BinOp::dispatcher_t& d = dispatcher();
+        BinOp::dispatcher_t::iterator itr = d.find(k);
+        if( itr != d.end() )
+            return ((*itr).second)( lhs_, rhs_ );
+
+        assert( lhs_->isOp() || rhs_->isOp() ); // either one is an Op
+
+        /// @todo optimize this dispatch by looking into possible reduction of temporaries
+
+        if( lhs_->isOp() )
+            lhs_ = lhs_->eval(); /// @note creates temporary
+
+        if( rhs_->isOp() )
+            rhs_ = rhs_->eval(); /// @note creates temporary
+
+        return eval(); // recall eval
+    }
+
+    static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
+
+protected:
+
+    ExpPtr lhs_;
+    ExpPtr rhs_;
+
+};
+
+//--------------------------------------------------------------------------------------------
+
+
+/// Dispatcher of binary operations
+
+//--------------------------------------------------------------------------------------------
+
+
+/// Generates a Add expressions
 class Add {
 public:
 
     static std::string class_name() { return "Add"; }
 
-    /// Represents a Add expression
-    struct Op : public ExpOp
+    struct Op : public BinOp
     {
-        ExpPtr lhs_;
-        ExpPtr rhs_;
-
-        Op( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
-
+        Op( ExpPtr lhs, ExpPtr rhs ) : BinOp(lhs,rhs) {}
         virtual std::string opName() const { return Add::class_name(); }
-
-        VarPtr eval()
-        {
-            binop_key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
-
-            binop_map_t::iterator itr = binop_dispatcher.find(k);
-            if( itr != binop_dispatcher.end() )
-                return ((*itr).second)( lhs_, rhs_ );
-
-            assert( lhs_->isOp() || rhs_->isOp() ); // either one is an Op
-
-            /// @todo optimize this dispatch by looking into possible reduction of temporaries
-
-            if( lhs_->isOp() )
-                lhs_ = lhs_->eval(); /// @note creates temporary
-
-            if( rhs_->isOp() )
-                rhs_ = rhs_->eval(); /// @note creates temporary
-
-            return Op( lhs_, rhs_ ).eval();
-        }
     };
 
-    static VarPtr eval_add_scalar_scalar( ExpPtr& lhs, ExpPtr& rhs )
+    static VarPtr eval_scalar_scalar( ExpPtr& lhs, ExpPtr& rhs )
     {
         assert( lhs->type() == Exp::SCALAR );
         assert( rhs->type() == Exp::SCALAR );
         return maths::scalar( lhs->as<Scalar>()->value() + rhs->as<Scalar>()->value() );
     }
 
-    static VarPtr eval_add_vector_scalar( ExpPtr& v, ExpPtr& s )
+    static VarPtr eval_vector_scalar( ExpPtr& v, ExpPtr& s )
     {
-        return eval_add_scalar_vector(s,v);
+        return eval_scalar_vector(s,v);
     }
 
-    static VarPtr eval_add_scalar_vector( ExpPtr& s, ExpPtr& v )
+    static VarPtr eval_scalar_vector( ExpPtr& s, ExpPtr& v )
     {
         assert( s->type() == Exp::SCALAR );
         assert( v->type() == Exp::VECTOR );
@@ -216,7 +235,7 @@ public:
         return VarPtr(res);
     }
 
-    static VarPtr eval_add_vector_vector( ExpPtr& v1, ExpPtr& v2 )
+    static VarPtr eval_vector_vector( ExpPtr& v1, ExpPtr& v2 )
     {
         assert( v1->type() == Exp::VECTOR );
         assert( v2->type() == Exp::VECTOR );
@@ -254,65 +273,40 @@ struct AddRegister
     AddRegister()
     {
         std::string add( Add::class_name() );
-        binop_dispatcher[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, add ) ] = &(Add::eval_add_scalar_scalar);
-        binop_dispatcher[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, add ) ] = &(Add::eval_add_scalar_vector);
-        binop_dispatcher[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, add ) ] = &(Add::eval_add_vector_scalar);
-        binop_dispatcher[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, add ) ] = &(Add::eval_add_vector_vector);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, add ) ] = &(Add::eval_scalar_scalar);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, add ) ] = &(Add::eval_scalar_vector);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, add ) ] = &(Add::eval_vector_scalar);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, add ) ] = &(Add::eval_vector_vector);
     }
 };
 
 static AddRegister add_register;
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
 /// @todo find a way to avoid this duplication of classes
 
+/// Generates a Prod expressions
 class Prod {
 public:
 
     static std::string class_name() { return "Prod"; }
 
     /// Represents a Prod expression
-    struct Op : public ExpOp
+    struct Op : public BinOp
     {
-        ExpPtr lhs_;
-        ExpPtr rhs_;
-
+        Op( ExpPtr lhs, ExpPtr rhs ) : BinOp(lhs,rhs) {}
         virtual std::string opName() const { return Prod::class_name(); }
-
-        Op( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
-
-        VarPtr eval()
-        {
-            binop_key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
-
-            binop_map_t::iterator itr = binop_dispatcher.find(k);
-            if( itr != binop_dispatcher.end() )
-                return ((*itr).second)( lhs_, rhs_ );
-
-            assert( lhs_->isOp() || rhs_->isOp() ); // either one is not a Var
-
-            /// @todo optimize this dispatch by looking into possible reduction of temporaries
-
-            if( lhs_->isOp() )
-                lhs_ = lhs_->eval(); /// @note creates temporary
-
-            if( rhs_->isOp() )
-                rhs_ = rhs_->eval(); /// @note creates temporary
-
-            return Op( lhs_, rhs_ ).eval();
-        }
-
     };
 
-    static VarPtr eval_prod_scalar_scalar( ExpPtr& lhs, ExpPtr& rhs )
+    static VarPtr eval_scalar_scalar( ExpPtr& lhs, ExpPtr& rhs )
     {
         assert( lhs->type() == Exp::SCALAR );
         assert( rhs->type() == Exp::SCALAR );
         return maths::scalar( lhs->as<Scalar>()->value() * rhs->as<Scalar>()->value() );
     }
 
-    static VarPtr eval_prod_scalar_vector( ExpPtr& s, ExpPtr& v )
+    static VarPtr eval_scalar_vector( ExpPtr& s, ExpPtr& v )
     {
         assert( s->type() == Exp::SCALAR );
         assert( v->type() == Exp::VECTOR );
@@ -329,12 +323,12 @@ public:
         return VarPtr(res);
     }
 
-    static VarPtr eval_prod_vector_scalar( ExpPtr& v, ExpPtr& s )
+    static VarPtr eval_vector_scalar( ExpPtr& v, ExpPtr& s )
     {
-        return eval_prod_scalar_vector(s,v);
+        return eval_scalar_vector(s,v);
     }
 
-    static VarPtr eval_prod_vector_vector( ExpPtr& v1, ExpPtr& v2 )
+    static VarPtr eval_vector_vector( ExpPtr& v1, ExpPtr& v2 )
     {
         assert( v1->type() == Exp::VECTOR );
         assert( v2->type() == Exp::VECTOR );
@@ -365,10 +359,10 @@ struct ProdRegister
     ProdRegister()
     {
         std::string prod( Prod::class_name() );
-        binop_dispatcher[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, prod ) ] = &(Prod::eval_prod_scalar_scalar);
-        binop_dispatcher[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, prod ) ] = &(Prod::eval_prod_scalar_vector);
-        binop_dispatcher[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, prod ) ] = &(Prod::eval_prod_vector_scalar);
-        binop_dispatcher[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, prod ) ] = &(Prod::eval_prod_vector_vector);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, prod ) ] = &(Prod::eval_scalar_scalar);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, prod ) ] = &(Prod::eval_scalar_vector);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, prod ) ] = &(Prod::eval_vector_scalar);
+        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, prod ) ] = &(Prod::eval_vector_vector);
     }
 };
 
@@ -381,11 +375,11 @@ ExpPtr prod( Exp&   l, ExpPtr r ) { return ExpPtr( new Prod::Op(l.self(),r) ); }
 ExpPtr prod( ExpPtr l, Exp&   r ) { return ExpPtr( new Prod::Op(l,r.self()) ); }
 ExpPtr prod( Exp&   l, Exp&   r ) { return ExpPtr( new Prod::Op(l.self(),r.self()) ); }
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
 } // namespace maths
 
-//-----------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------
 
 int main()
 {
