@@ -14,6 +14,13 @@
 #include <boost/tuple/tuple.hpp>
 #include <boost/tuple/tuple_comparison.hpp>
 
+//--------------------------------------------------------------------------------------------
+
+/// @todo unary operator
+/// @todo operator returning scalar
+/// @todo operator returning multiple outputs
+/// @todo how to support multiple implementations ( MKL, CuBLAS, etc. )
+
 namespace maths {
 
 //--------------------------------------------------------------------------------------------
@@ -25,7 +32,7 @@ typedef double scalar_t;
 class Var;
 class Exp;
 
-typedef boost::shared_ptr<Var>  VarPtr;
+typedef boost::shared_ptr<Var> VarPtr;
 typedef boost::shared_ptr<Exp> ExpPtr;
 
 //--------------------------------------------------------------------------------------------
@@ -131,7 +138,6 @@ VarPtr vector( const Vector::storage_t& v  ) { return VarPtr( new Vector(v) ); }
 
 //--------------------------------------------------------------------------------------------
 
-
 class ExpOp : public Exp {
 public:
 
@@ -142,13 +148,15 @@ public:
 
 //--------------------------------------------------------------------------------------------
 
-
 class BinOp : public ExpOp {
-public:
+
+public: // types
 
     typedef boost::tuple< Exp::Type, Exp::Type, std::string > key_t;
     typedef boost::function< VarPtr ( ExpPtr& , ExpPtr& ) >   value_t;
     typedef std::map< key_t, value_t > dispatcher_t;
+
+public: // methods
 
     BinOp( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
 
@@ -174,6 +182,9 @@ public:
         return eval(); // recall eval
     }
 
+    ExpPtr& lhs() { return lhs_; }
+    ExpPtr& rhs() { return rhs_; }
+
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
 
 protected:
@@ -184,7 +195,6 @@ protected:
 };
 
 //--------------------------------------------------------------------------------------------
-
 
 /// Generates a Add expressions
 class Add {
@@ -275,8 +285,6 @@ struct AddRegister
 static AddRegister add_register;
 
 //--------------------------------------------------------------------------------------------
-
-/// @todo find a way to avoid this duplication of classes
 
 /// Generates a Prod expressions
 class Prod {
