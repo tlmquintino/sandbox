@@ -6,7 +6,6 @@
 #include <map>
 #include <utility>
 
-#include <boost/any.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/function.hpp>
 #include <boost/noncopyable.hpp>
@@ -21,13 +20,21 @@
 /// @todo operator returning multiple outputs
 /// @todo how to support multiple implementations ( MKL, CuBLAS, etc. )
 
+#if 1
+#define DBG     std::cout << __FILE__ << " +" << __LINE__ << std::endl;
+#define DBGX(x) std::cout << __FILE__ << " +" << __LINE__ << " " << #x << " -> " << x << std::endl;
+#else
+#define DBG
+#define DBGX(x)
+#endif
+
+//--------------------------------------------------------------------------------------------
+
 namespace maths {
 
 //--------------------------------------------------------------------------------------------
 
 typedef double scalar_t;
-
-//--------------------------------------------------------------------------------------------
 
 class Var;
 class Exp;
@@ -46,6 +53,7 @@ public:
     enum Type { SCALAR, VECTOR, OP };
 
     virtual Exp::Type type() const = 0;
+    virtual std::string type_name() const = 0;
 
     virtual ~Exp() {}
     virtual VarPtr eval() = 0;
@@ -64,7 +72,6 @@ public:
 
 //--------------------------------------------------------------------------------------------
 
-
 class Var : public Exp {
 public:
 
@@ -81,7 +88,6 @@ public:
 
 //--------------------------------------------------------------------------------------------
 
-
 class Scalar : public Var {
 public:
 
@@ -89,6 +95,7 @@ public:
 
     virtual size_t size() const { return 1; }
     virtual Exp::Type type() const { return Exp::SCALAR; }
+    virtual std::string type_name() const { return "Scalar"; }
 
     scalar_t value() const { return v_; }
 
@@ -105,7 +112,6 @@ VarPtr scalar( const scalar_t& s  ) { return VarPtr( new Scalar(s) ); }
 
 //--------------------------------------------------------------------------------------------
 
-
 class Vector : public Var {
 public:
 
@@ -116,6 +122,7 @@ public:
     Vector( const storage_t& v ) : v_(v) {}
 
     virtual Exp::Type type() const { return Exp::VECTOR; }
+    virtual std::string type_name() const { return "Vector"; }
 
 //    virtual ~Vector() { std::cout << "deleting Vector" << std::endl; }
 
@@ -144,7 +151,12 @@ public:
     virtual Exp::Type type() const { return Exp::OP; }
     virtual std::string opName() const = 0;
 
+    virtual size_t arity() const = 0;
+    virtual ExpPtr& param( const size_t& ) = 0;
+
 };
+
+typedef boost::shared_ptr<ExpOp> ExpOpPtr;
 
 //--------------------------------------------------------------------------------------------
 
@@ -173,24 +185,92 @@ public: // methods
 
         /// @todo optimize this dispatch by looking into possible reduction of temporaries
 
-        if( lhs_->isOp() )
-            lhs_ = lhs_->eval(); /// @note creates temporary
-
-        if( rhs_->isOp() )
-            rhs_ = rhs_->eval(); /// @note creates temporary
+        lhs_ = lhs_->eval(); // possibly creates temporary
+        rhs_ = rhs_->eval(); // possibly creates temporary
 
         return eval(); // recall eval
     }
+
+    virtual std::string type_name() const { return "BinOp"; }
 
     ExpPtr& lhs() { return lhs_; }
     ExpPtr& rhs() { return rhs_; }
 
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
 
+    virtual size_t arity() const { return 2; }
+    virtual ExpPtr& param( const size_t& i )
+    {
+        assert( i < 2 );
+        return i ? rhs_ : lhs_ ;
+    }
+
 protected:
 
     ExpPtr lhs_;
     ExpPtr rhs_;
+
+};
+
+//--------------------------------------------------------------------------------------------
+
+class TriOp : public ExpOp {
+
+public: // types
+
+    typedef boost::tuple< Exp::Type, Exp::Type, Exp::Type, std::string >   key_t;
+    typedef boost::function< VarPtr ( ExpPtr&, ExpPtr&, ExpPtr& ) >        value_t;
+    typedef std::map< key_t, value_t > dispatcher_t;
+
+public: // methods
+
+    TriOp( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) : p1_(p1), p2_(p2), p3_(p3) {}
+
+    VarPtr eval()
+    {
+        TriOp::key_t k = boost::make_tuple( p1_->type(),
+                                            p2_->type(),
+                                            p3_->type(),
+                                            opName() );
+
+        TriOp::dispatcher_t& d = dispatcher();
+        TriOp::dispatcher_t::iterator itr = d.find(k);
+        if( itr != d.end() )
+            return ((*itr).second)( p1_, p2_, p3_ );
+
+        assert( p1_->isOp() || p2_->isOp() || p3_->isOp() ); // either one is an Op
+
+        /// @todo optimize this dispatch by looking into possible reduction of temporaries
+
+        p1_ = p1_->eval(); // possibly creates temporary
+        p2_ = p2_->eval(); // possibly creates temporary
+        p3_ = p3_->eval(); // possibly creates temporary
+
+        return eval(); // recall eval
+    }
+
+    virtual std::string type_name() const { return "TriOp"; }
+
+    ExpPtr& p1() { return p1_; }
+    ExpPtr& p2() { return p2_; }
+    ExpPtr& p3() { return p3_; }
+
+    static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
+
+    virtual size_t arity() const { return 3; }
+    virtual ExpPtr& param( const size_t& i )
+    {
+        assert( i < arity() );
+        if( i == 0 ) return p1_;
+        if( i == 1 ) return p2_;
+        return p3_;
+    }
+
+protected:
+
+    ExpPtr p1_;
+    ExpPtr p2_;
+    ExpPtr p3_;
 
 };
 
@@ -257,10 +337,18 @@ public:
     }
 
     ExpPtr operator() ( ExpPtr l, ExpPtr r ) { return ExpPtr( new Add::Op(l,r) ); }
-    ExpPtr operator() ( Exp&   l, ExpPtr r ) { return ExpPtr( new Add::Op(l.self(),r) ); }
-    ExpPtr operator() ( ExpPtr l, Exp&   r ) { return ExpPtr( new Add::Op(l,r.self()) ); }
-    ExpPtr operator() ( Exp&   l, Exp&   r ) { return ExpPtr( new Add::Op(l.self(),r.self()) ); }
 
+    struct Register
+    {
+        Register()
+        {
+            std::string add( Add::class_name() );
+            BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, add ) ] = &(Add::eval_scalar_scalar);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, add ) ] = &(Add::eval_scalar_vector);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, add ) ] = &(Add::eval_vector_scalar);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, add ) ] = &(Add::eval_vector_vector);
+        }
+    };
 };
 
 // version with stand alone functions
@@ -270,19 +358,7 @@ ExpPtr add( Exp&   l, ExpPtr r ) { return ExpPtr( new Add::Op(l.self(),r) ); }
 ExpPtr add( ExpPtr l, Exp&   r ) { return ExpPtr( new Add::Op(l,r.self()) ); }
 ExpPtr add( Exp&   l, Exp&   r ) { return ExpPtr( new Add::Op(l.self(),r.self()) ); }
 
-struct AddRegister
-{
-    AddRegister()
-    {
-        std::string add( Add::class_name() );
-        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, add ) ] = &(Add::eval_scalar_scalar);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, add ) ] = &(Add::eval_scalar_vector);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, add ) ] = &(Add::eval_vector_scalar);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, add ) ] = &(Add::eval_vector_vector);
-    }
-};
-
-static AddRegister add_register;
+static Add::Register add_register;
 
 //--------------------------------------------------------------------------------------------
 
@@ -348,25 +424,21 @@ public:
     }
 
     ExpPtr operator() ( ExpPtr l, ExpPtr r ) { return ExpPtr( new Prod::Op(l,r) ); }
-    ExpPtr operator() ( Exp&   l, ExpPtr r ) { return ExpPtr( new Prod::Op(l.self(),r) ); }
-    ExpPtr operator() ( ExpPtr l, Exp&   r ) { return ExpPtr( new Prod::Op(l,r.self()) ); }
-    ExpPtr operator() ( Exp&   l, Exp&   r ) { return ExpPtr( new Prod::Op(l.self(),r.self()) ); }
 
-};
-
-struct ProdRegister
-{
-    ProdRegister()
+    struct Register
     {
-        std::string prod( Prod::class_name() );
-        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, prod ) ] = &(Prod::eval_scalar_scalar);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, prod ) ] = &(Prod::eval_scalar_vector);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, prod ) ] = &(Prod::eval_vector_scalar);
-        BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, prod ) ] = &(Prod::eval_vector_vector);
-    }
+        Register()
+        {
+            std::string prod( Prod::class_name() );
+            BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, prod ) ] = &(Prod::eval_scalar_scalar);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, prod ) ] = &(Prod::eval_scalar_vector);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, prod ) ] = &(Prod::eval_vector_scalar);
+            BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, prod ) ] = &(Prod::eval_vector_vector);
+        }
+    };
 };
 
-static ProdRegister prod_register;
+static Prod::Register prod_register;
 
 // version with stand alone functions
 
@@ -374,6 +446,151 @@ ExpPtr prod( ExpPtr l, ExpPtr r ) { return ExpPtr( new Prod::Op(l,r) ); }
 ExpPtr prod( Exp&   l, ExpPtr r ) { return ExpPtr( new Prod::Op(l.self(),r) ); }
 ExpPtr prod( ExpPtr l, Exp&   r ) { return ExpPtr( new Prod::Op(l,r.self()) ); }
 ExpPtr prod( Exp&   l, Exp&   r ) { return ExpPtr( new Prod::Op(l.self(),r.self()) ); }
+
+//--------------------------------------------------------------------------------------------
+
+/// Generates a ProdAdd expressions
+class ProdAdd {
+public:
+
+    static std::string class_name() { return "ProdAdd"; }
+
+    /// Represents a ProdAdd expression
+    struct Op : public TriOp
+    {
+        Op( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) : TriOp(p1,p2,p3) {}
+        virtual std::string opName() const { return ProdAdd::class_name(); }
+    };
+
+    static VarPtr eval_svv( ExpPtr& ps, ExpPtr& pv1, ExpPtr& pv2  )
+    {
+        assert( ps->type() == Exp::SCALAR );
+        assert( pv1->type() == Exp::VECTOR );
+        assert( pv2->type() == Exp::VECTOR );
+
+        scalar_t s = ps->as<Scalar>()->value();
+
+        Vector::storage_t& v1 = pv1->as<Vector>()->ref_value();
+        Vector::storage_t& v2 = pv2->as<Vector>()->ref_value();
+
+        assert( v1.size() == v2.size() );
+
+        Vector* res = new Vector( v1.size() );
+        Vector::storage_t& rv = res->ref_value();
+
+        std::cout << "(optimized prod_add svv) ";
+
+        for( size_t i = 0; i < rv.size(); ++i )
+            rv[i] = s * ( v1[i] + v2[i] );
+
+        return VarPtr(res);
+    }
+
+    static VarPtr eval_vvv( ExpPtr& pv1, ExpPtr& pv2, ExpPtr& pv3  )
+    {
+        assert( pv1->type() == Exp::VECTOR );
+        assert( pv2->type() == Exp::VECTOR );
+        assert( pv3->type() == Exp::VECTOR );
+
+        Vector::storage_t& v1 = pv1->as<Vector>()->ref_value();
+        Vector::storage_t& v2 = pv2->as<Vector>()->ref_value();
+        Vector::storage_t& v3 = pv3->as<Vector>()->ref_value();
+
+        assert( v1.size() == v2.size() );
+        assert( v1.size() == v3.size() );
+
+        Vector* res = new Vector( v1.size() );
+        Vector::storage_t& rv = res->ref_value();
+
+        std::cout << "running optimized prod_add svv" << std::endl;
+
+        for( size_t i = 0; i < rv.size(); ++i )
+            rv[i] = v1[i] * ( v2[i] + v3[i] );
+
+        return VarPtr(res);
+    }
+
+    /// Generic prod_add implementation based on calling first add() then prod()
+    static VarPtr eval_ggg( ExpPtr& p1, ExpPtr& p2, ExpPtr& p3  )
+    {
+        return prod(p1,add(p2,p3))->eval();
+    }
+
+    ExpPtr operator() ( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) { return ExpPtr( new ProdAdd::Op(p1,p2,p3) ); }
+
+    struct Register
+    {
+        Register()
+        {
+            std::string op( ProdAdd::class_name() );
+
+            // generic cases
+            TriOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, Exp::SCALAR, op ) ] = &(ProdAdd::eval_ggg);
+            TriOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_ggg);
+
+            TriOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, Exp::SCALAR, op ) ] = &(ProdAdd::eval_ggg);
+//            TriOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_ggg);
+
+            TriOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, Exp::SCALAR, op ) ] = &(ProdAdd::eval_ggg);
+            TriOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_ggg);
+
+            TriOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, Exp::SCALAR, op ) ] = &(ProdAdd::eval_ggg);
+//            TriOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_ggg);
+
+            // special cases
+            TriOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_svv);
+            TriOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, Exp::VECTOR, op ) ] = &(ProdAdd::eval_vvv);
+        }
+    };
+
+};
+
+static ProdAdd::Register prodadd_register;
+
+// version with stand alone functions
+
+ExpPtr prod_add( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) { return ExpPtr( new ProdAdd::Op(p1,p2,p3) ); }
+
+//--------------------------------------------------------------------------------------------
+
+class Optimiser : private boost::noncopyable {
+public:
+    Optimiser() {}
+    virtual ~Optimiser() {}
+    virtual void optimise( ExpPtr& ) = 0;
+};
+
+class ProdAddOptim : public Optimiser {
+public:
+    virtual void optimise( ExpPtr& x )
+    {
+        if( x->isVar() ) return; // finish traverse at variables
+
+        // traverse the tree
+
+        ExpOp& op = *(x->as<ExpOp>());
+        const size_t arity = op.arity();
+        for( size_t i = 0; i< arity; ++i )
+             optimise( op.param(i) );
+
+        // optimise
+//        DBGX(op.opName());
+//        DBGX(op.arity());
+//        DBGX(op.param(0)->type_name());
+//        DBGX(op.param(1)->type_name());
+        if( arity == 2 && op.opName() == "Prod" &&  op.param(0)->isVar()  && op.param(1)->isOp() ) // binary op
+        {
+            ExpOpPtr op1 = op.param(1)->as<ExpOp>();
+
+            if( op1->opName()  == "Add" )
+            {
+                assert( op1->arity() == 2);
+                x = prod_add( op.param(0), op1->param(0), op1->param(1) );
+            }
+        }
+
+    }
+};
 
 //--------------------------------------------------------------------------------------------
 
@@ -401,7 +618,7 @@ int main()
     VarPtr r = Add()( a , c )->eval();
     std::cout << "r = " <<  r << std::endl;
 
-    // scalar + vector --> 7 = 2 + 5
+    // scalar + vector --> 7 = 2 + 5:
 
     VarPtr r2 = Add()( a , v1 )->eval();
     std::cout << "r2 = " << r2 << std::endl;
@@ -412,7 +629,7 @@ int main()
 
     // vector + vector --> 12 = 5 + 7
 
-    std::cout << "r3 = " << Add()( *v1, *v2 )->eval() << std::endl;
+    std::cout << "r3 = " << add( *v1, *v2 )->eval() << std::endl;
 
     // vector + vector --> 10 = 5 + 5
 
@@ -433,9 +650,26 @@ int main()
 
     std::cout << "r7 = " << prod( v1 , add( *v1, v2 ) )->eval() << std::endl;
 
+    // v = s * ( v1 + v2 ) --> 14 = 2 * ( 5 + 7 )
+
+    std::cout << "r8 = " << prod_add( scalar(2.), v1, v2 )->eval() << std::endl;
+
+    // s = s * ( s + s ) --> 14 = 2 * ( 3 + 4 )
+
+    std::cout << "r9 = " << prod_add( scalar(2.), scalar(3.), scalar(4.) )->eval() << std::endl;
+
+    // s = s * ( s + s ) --> 24 = 2 * ( 3 + ( 4 + 5:) )
+
+    std::cout << "r10 = " << prod_add( scalar(2.), scalar(3.), add( scalar(4.) , v1 ) )->eval() << std::endl;
+
     // optimization : v = s * ( v1 + v2 ) --> 24 = 2 * ( 5 + 7 )
 
-    std::cout << "r8 = " << prod( scalar(2.) , add( *v1, v2 ) )->eval() << std::endl;
+    //    ExpPtr op = prod( scalar(2.) , add( v1, v2 ) );
+    ExpPtr op = prod( scalar(2.) , add( v1, prod( scalar(2.) , add( v1, v2 ) ) ) );
+    ProdAddOptim opt;
+    opt.optimise(op);
+    std::cout << "r11 = " << op->eval() << std::endl;
+
 
 #if 0
 
@@ -454,9 +688,7 @@ int main()
 
 // ---
 
-    Var f1 = IO::Source("http://sdkjnfodjfskjdfbsk/grib");
-
-    IO::Dump( Regrid( '0.5/0.5' )( f1 ), "out.grib" );
+    IO::Dump( Regrid( '0.5/0.5' )( IO::Source("http://sdkjnfodjfskjdfbsk/grib") ), "out.grib" )->eval();
 
 #endif
 
