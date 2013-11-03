@@ -42,6 +42,10 @@ class Exp;
 typedef boost::shared_ptr<Var> VarPtr;
 typedef boost::shared_ptr<Exp> ExpPtr;
 
+ExpPtr add( ExpPtr, ExpPtr );
+ExpPtr prod( ExpPtr, ExpPtr );
+ExpPtr prod_add( ExpPtr, ExpPtr, ExpPtr );
+
 //--------------------------------------------------------------------------------------------
 
 class Exp : public boost::enable_shared_from_this<Exp>,
@@ -57,6 +61,7 @@ public:
 
     virtual ~Exp() {}
     virtual VarPtr eval() = 0;
+    virtual ExpPtr optimise() = 0;
 
     ExpPtr self() { return shared_from_this(); }
 
@@ -76,6 +81,7 @@ class Var : public Exp {
 public:
 
     virtual VarPtr eval() { return boost::static_pointer_cast<Var>( shared_from_this() ); }
+    virtual ExpPtr optimise() { return shared_from_this(); }
 
     virtual size_t size() const = 0;
 
@@ -168,6 +174,9 @@ public: // types
     typedef boost::function< VarPtr ( ExpPtr& , ExpPtr& ) >   value_t;
     typedef std::map< key_t, value_t > dispatcher_t;
 
+    typedef boost::function< ExpPtr ( ExpPtr ) > optim_t;
+    typedef std::map< key_t, optim_t > optimiser_t;
+
 public: // methods
 
     BinOp( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
@@ -191,12 +200,28 @@ public: // methods
         return eval(); // recall eval
     }
 
+    ExpPtr optimise()
+    {
+        lhs_ = lhs_->optimise();
+        rhs_ = rhs_->optimise();
+
+        BinOp::key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
+
+        BinOp::optimiser_t& d = optimiser();
+        BinOp::optimiser_t::iterator itr = d.find(k);
+        if( itr != d.end() )
+            return ((*itr).second)( shared_from_this() );
+
+        return shared_from_this();
+    }
+
     virtual std::string type_name() const { return "BinOp"; }
 
     ExpPtr& lhs() { return lhs_; }
     ExpPtr& rhs() { return rhs_; }
 
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
+    static optimiser_t& optimiser() { static optimiser_t o; return o; }
 
     virtual size_t arity() const { return 2; }
     virtual ExpPtr& param( const size_t& i )
@@ -221,6 +246,9 @@ public: // types
     typedef boost::tuple< Exp::Type, Exp::Type, Exp::Type, std::string >   key_t;
     typedef boost::function< VarPtr ( ExpPtr&, ExpPtr&, ExpPtr& ) >        value_t;
     typedef std::map< key_t, value_t > dispatcher_t;
+
+    typedef boost::function< ExpPtr ( ExpPtr ) > optim_t;
+    typedef std::map< key_t, optim_t > optimiser_t;
 
 public: // methods
 
@@ -249,6 +277,25 @@ public: // methods
         return eval(); // recall eval
     }
 
+    ExpPtr optimise()
+    {
+        p1_ = p1_->optimise();
+        p2_ = p2_->optimise();
+        p3_ = p3_->optimise();
+
+        TriOp::key_t k = boost::make_tuple( p1_->type(),
+                                            p2_->type(),
+                                            p3_->type(),
+                                            opName() );
+
+        TriOp::optimiser_t& d = optimiser();
+        TriOp::optimiser_t::iterator itr = d.find(k);
+        if( itr != d.end() )
+            return ((*itr).second)( shared_from_this() );
+
+        return shared_from_this();
+    }
+
     virtual std::string type_name() const { return "TriOp"; }
 
     ExpPtr& p1() { return p1_; }
@@ -256,6 +303,7 @@ public: // methods
     ExpPtr& p3() { return p3_; }
 
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
+    static optimiser_t& optimiser() { static optimiser_t o; return o; }
 
     virtual size_t arity() const { return 3; }
     virtual ExpPtr& param( const size_t& i )
@@ -362,6 +410,36 @@ static Add::Register add_register;
 
 //--------------------------------------------------------------------------------------------
 
+class ProdOptimser {
+public:
+    static ExpPtr optimise_var_op( ExpPtr x )
+    {
+        assert( x->isOp() );
+        ExpOp& op = *(x->as<ExpOp>());
+
+        assert( op.opName() == "Prod" );
+        assert( op.arity() == 2 );
+
+        ExpPtr p0 = op.param(0);
+        ExpPtr p1 = op.param(1);
+
+        assert( p0->isVar() );
+        assert( p1->isOp()  );
+
+        ExpOpPtr op1 = p1->as<ExpOp>();
+
+        if( op1->opName()  == "Add" )
+        {
+            assert( op1->arity() == 2);
+            return prod_add( p0, op1->param(0), op1->param(1) );
+        }
+
+        return x; // no optimisation was possible
+    }
+};
+
+//--------------------------------------------------------------------------------------------
+
 /// Generates a Prod expressions
 class Prod {
 public:
@@ -430,10 +508,14 @@ public:
         Register()
         {
             std::string prod( Prod::class_name() );
+
             BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::SCALAR, prod ) ] = &(Prod::eval_scalar_scalar);
             BinOp::dispatcher()[ boost::make_tuple( Exp::SCALAR, Exp::VECTOR, prod ) ] = &(Prod::eval_scalar_vector);
             BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::SCALAR, prod ) ] = &(Prod::eval_vector_scalar);
             BinOp::dispatcher()[ boost::make_tuple( Exp::VECTOR, Exp::VECTOR, prod ) ] = &(Prod::eval_vector_vector);
+
+            BinOp::optimiser()[ boost::make_tuple( Exp::SCALAR, Exp::OP, prod ) ] = &(ProdOptimser::optimise_var_op);
+            BinOp::optimiser()[ boost::make_tuple( Exp::VECTOR, Exp::OP, prod ) ] = &(ProdOptimser::optimise_var_op);
         }
     };
 };
@@ -553,47 +635,6 @@ ExpPtr prod_add( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) { return ExpPtr( new ProdAdd:
 
 //--------------------------------------------------------------------------------------------
 
-class Optimiser : private boost::noncopyable {
-public:
-    Optimiser() {}
-    virtual ~Optimiser() {}
-    virtual void optimise( ExpPtr& ) = 0;
-};
-
-class ProdAddOptim : public Optimiser {
-public:
-    virtual void optimise( ExpPtr& x )
-    {
-        if( x->isVar() ) return; // finish traverse at variables
-
-        // traverse the tree
-
-        ExpOp& op = *(x->as<ExpOp>());
-        const size_t arity = op.arity();
-        for( size_t i = 0; i< arity; ++i )
-             optimise( op.param(i) );
-
-        // optimise
-//        DBGX(op.opName());
-//        DBGX(op.arity());
-//        DBGX(op.param(0)->type_name());
-//        DBGX(op.param(1)->type_name());
-        if( arity == 2 && op.opName() == "Prod" &&  op.param(0)->isVar()  && op.param(1)->isOp() ) // binary op
-        {
-            ExpOpPtr op1 = op.param(1)->as<ExpOp>();
-
-            if( op1->opName()  == "Add" )
-            {
-                assert( op1->arity() == 2);
-                x = prod_add( op.param(0), op1->param(0), op1->param(1) );
-            }
-        }
-
-    }
-};
-
-//--------------------------------------------------------------------------------------------
-
 } // namespace maths
 
 //--------------------------------------------------------------------------------------------
@@ -666,8 +707,9 @@ int main()
 
     //    ExpPtr op = prod( scalar(2.) , add( v1, v2 ) );
     ExpPtr op = prod( scalar(2.) , add( v1, prod( scalar(2.) , add( v1, v2 ) ) ) );
-    ProdAddOptim opt;
-    opt.optimise(op);
+
+    op = op->optimise();
+
     std::cout << "r11 = " << op->eval() << std::endl;
 
 
