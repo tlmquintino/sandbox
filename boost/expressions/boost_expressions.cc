@@ -15,10 +15,12 @@
 
 //--------------------------------------------------------------------------------------------
 
+/// @todo comparison operator Equal()(v,2) -- returns what?
 /// @todo unary operator
 /// @todo operator returning scalar
 /// @todo operator returning multiple outputs
 /// @todo how to support multiple implementations ( MKL, CuBLAS, etc. )
+/// @todo create a expression tree Visitor class that takes an operation as parameter
 
 #if 1
 #define DBG     std::cout << __FILE__ << " +" << __LINE__ << std::endl;
@@ -85,11 +87,10 @@ public:
 
     virtual size_t size() const = 0;
 
-    friend std::ostream& operator<<( std::ostream& os, const Var& v) { v.print(os); return os; }
-
-    friend std::ostream& operator<<( std::ostream& os, const VarPtr& v) { v->print(os); return os; }
-
     virtual std::ostream& print( std::ostream& ) const = 0;
+
+    friend std::ostream& operator<<( std::ostream& os, const Var& v) { v.print(os); return os; }
+    friend std::ostream& operator<<( std::ostream& os, const VarPtr& v) { v->print(os); return os; }
 };
 
 //--------------------------------------------------------------------------------------------
@@ -179,33 +180,31 @@ public: // types
 
 public: // methods
 
-    BinOp( ExpPtr lhs, ExpPtr rhs ) : lhs_(lhs), rhs_(rhs) {}
+    BinOp( ExpPtr p1, ExpPtr p2 ) : p1_(p1), p2_(p2) {}
 
     VarPtr eval()
     {
-        BinOp::key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
+        BinOp::key_t k = boost::make_tuple( p1_->type(), p2_->type(), opName() );
 
         BinOp::dispatcher_t& d = dispatcher();
         BinOp::dispatcher_t::iterator itr = d.find(k);
         if( itr != d.end() )
-            return ((*itr).second)( lhs_, rhs_ );
+            return ((*itr).second)( p1_, p2_ );
 
-        assert( lhs_->isOp() || rhs_->isOp() ); // either one is an Op
+        assert( p1_->isOp() || p2_->isOp() ); // either one is an Op
 
-        /// @todo optimize this dispatch by looking into possible reduction of temporaries
-
-        lhs_ = lhs_->eval(); // possibly creates temporary
-        rhs_ = rhs_->eval(); // possibly creates temporary
+        p1_ = p1_->eval(); // possibly creates temporary
+        p2_ = p2_->eval(); // possibly creates temporary
 
         return eval(); // recall eval
     }
 
     ExpPtr optimise()
     {
-        lhs_ = lhs_->optimise();
-        rhs_ = rhs_->optimise();
+        p1_ = p1_->optimise();
+        p2_ = p2_->optimise();
 
-        BinOp::key_t k = boost::make_tuple( lhs_->type(), rhs_->type(), opName() );
+        BinOp::key_t k = boost::make_tuple( p1_->type(), p2_->type(), opName() );
 
         BinOp::optimiser_t& d = optimiser();
         BinOp::optimiser_t::iterator itr = d.find(k);
@@ -217,8 +216,8 @@ public: // methods
 
     virtual std::string type_name() const { return "BinOp"; }
 
-    ExpPtr& lhs() { return lhs_; }
-    ExpPtr& rhs() { return rhs_; }
+    ExpPtr& lhs() { return p1_; }
+    ExpPtr& rhs() { return p2_; }
 
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
     static optimiser_t& optimiser() { static optimiser_t o; return o; }
@@ -227,13 +226,14 @@ public: // methods
     virtual ExpPtr& param( const size_t& i )
     {
         assert( i < 2 );
-        return i ? rhs_ : lhs_ ;
+        if( i ) return p2_;
+        return p1_;
     }
 
 protected:
 
-    ExpPtr lhs_;
-    ExpPtr rhs_;
+    ExpPtr p1_;
+    ExpPtr p2_;
 
 };
 
@@ -560,8 +560,6 @@ public:
         Vector* res = new Vector( v1.size() );
         Vector::storage_t& rv = res->ref_value();
 
-        std::cout << "(optimized prod_add svv) ";
-
         for( size_t i = 0; i < rv.size(); ++i )
             rv[i] = s * ( v1[i] + v2[i] );
 
@@ -635,6 +633,18 @@ ExpPtr prod_add( ExpPtr p1, ExpPtr p2, ExpPtr p3 ) { return ExpPtr( new ProdAdd:
 
 //--------------------------------------------------------------------------------------------
 
+ExpPtr operator+ ( VarPtr p1, VarPtr p2 ) { return add( p1, p2 ); }
+ExpPtr operator+ ( VarPtr p1, ExpPtr p2 ) { return add( p1, p2 ); }
+ExpPtr operator+ ( ExpPtr p1, VarPtr p2 ) { return add( p1, p2 ); }
+ExpPtr operator+ ( ExpPtr p1, ExpPtr p2 ) { return add( p1, p2 ); }
+
+ExpPtr operator* ( VarPtr p1, VarPtr p2 ) { return prod( p1, p2 ); }
+ExpPtr operator* ( VarPtr p1, ExpPtr p2 ) { return prod( p1, p2 ); }
+ExpPtr operator* ( ExpPtr p1, VarPtr p2 ) { return prod( p1, p2 ); }
+ExpPtr operator* ( ExpPtr p1, ExpPtr p2 ) { return prod( p1, p2 ); }
+
+//--------------------------------------------------------------------------------------------
+
 } // namespace maths
 
 //--------------------------------------------------------------------------------------------
@@ -643,26 +653,28 @@ int main()
 {
     using namespace maths;
 
-    VarPtr a = scalar( 2. );
-    VarPtr c = scalar( 4. );
+    ExpPtr a = scalar( 2. );
+    ExpPtr c = scalar( 4. );
 
     VarPtr v1 = maths::vector( 10, 5. );
     VarPtr v2 = maths::vector( 10, 7. );
 
-    std::cout << "a = " << a << std::endl;
-    std::cout << "c = " << c << std::endl;
-    std::cout << "v1 = " << v1 << std::endl;
-    std::cout << "v2 = " << v2 << std::endl;
+//    std::cout << "a = "  << a  << std::endl;
+//    std::cout << "c = "  << c  << std::endl;
+//    std::cout << "v1 = " << v1 << std::endl;
+//    std::cout << "v2 = " << v2 << std::endl;
 
     // scalar + scalar --> 6 = 2 + 4
 
     VarPtr r = Add()( a , c )->eval();
     std::cout << "r = " <<  r << std::endl;
+    std::cout << "r = " << (a + c)->eval() << std::endl;
 
     // scalar + vector --> 7 = 2 + 5:
 
     VarPtr r2 = Add()( a , v1 )->eval();
     std::cout << "r2 = " << r2 << std::endl;
+    std::cout << "r2 = " << (a + v1)->eval() << std::endl;
 
     // vector + scalar  --> 7 = 5 + 2
 
@@ -705,13 +717,19 @@ int main()
 
     // optimization : v = s * ( v1 + v2 ) --> 24 = 2 * ( 5 + 7 )
 
-    //    ExpPtr op = prod( scalar(2.) , add( v1, v2 ) );
-    ExpPtr op = prod( scalar(2.) , add( v1, prod( scalar(2.) , add( v1, v2 ) ) ) );
+    ExpPtr op11 = prod( scalar(2.) , add( v1, v2 ) )->optimise();
 
-    op = op->optimise();
+    std::cout << "r11 = " << op11->eval() << std::endl;
 
-    std::cout << "r11 = " << op->eval() << std::endl;
+    // recursive optimization : v = s * ( v1 + ( s * ( v1 + v2 ) ) ) --> 58 = 2 * ( 5 + (2 * ( 5 + 7 )) )
 
+    ExpPtr op12 = prod( scalar(2.) , add( v1, prod( scalar(2.) , add( v1, v2 ) ) ) );
+    std::cout << "r12 = " << op12->optimise()->eval() << std::endl;
+
+    // recursive optimization : v = s * ( v1 + ( s * ( v1 + v2 ) ) ) --> 58 = 2 * ( 5 + (2 * ( 5 + 7 )) )
+
+    ExpPtr op13 = a * ( v1 + ( a * ( v1 + v2 ) ) );
+    std::cout << "r13 = " << op13->eval() << std::endl;
 
 #if 0
 
