@@ -54,6 +54,8 @@ class Exp : public boost::enable_shared_from_this<Exp>,
             private boost::noncopyable {
 public:
 
+    static std::string class_name() { return "Exp"; }
+
     typedef boost::shared_ptr<Exp> Ptr;
 
     enum Type { SCALAR, VECTOR, OP };
@@ -61,26 +63,30 @@ public:
     virtual Exp::Type type() const = 0;
     virtual std::string type_name() const = 0;
 
+    virtual bool isTerminal() const = 0;
+
     virtual ~Exp() {}
+
     virtual VarPtr eval() = 0;
     virtual ExpPtr optimise() = 0;
 
     ExpPtr self() { return shared_from_this(); }
 
+    bool isVar() const { return isTerminal(); }
+    bool isOpr() const { return ! isTerminal(); }
+
     template< typename T >
     boost::shared_ptr<T> as() { return boost::dynamic_pointer_cast<T,Exp>( shared_from_this() ); }
-
-    bool isVar() { Type t = type(); return ( t == SCALAR || t == VECTOR ); }
-    bool isOp() { return type() == OP; }
-    bool isScalar() { return type() == SCALAR; }
-    bool isVector() { return type() == VECTOR; }
-
 };
 
 //--------------------------------------------------------------------------------------------
 
 class Var : public Exp {
 public:
+
+    static std::string class_name() { return "Var"; }
+
+    virtual bool isTerminal() const { return true; }
 
     virtual VarPtr eval() { return boost::static_pointer_cast<Var>( shared_from_this() ); }
     virtual ExpPtr optimise() { return shared_from_this(); }
@@ -96,14 +102,16 @@ public:
 //--------------------------------------------------------------------------------------------
 
 class Scalar : public Var {
-public:
+public: // methods
+
+    static std::string class_name() { return "Scalar"; }
 
     Scalar( const scalar_t& v ) : v_(v) {}
 
-    virtual size_t size() const { return 1; }
     virtual Exp::Type type() const { return Exp::SCALAR; }
-    virtual std::string type_name() const { return "Scalar"; }
+    virtual std::string type_name() const { return Scalar::class_name(); }
 
+    virtual size_t size() const { return 1; }
     scalar_t value() const { return v_; }
 
     /// returns a reference to the scalar
@@ -120,18 +128,20 @@ VarPtr scalar( const scalar_t& s  ) { return VarPtr( new Scalar(s) ); }
 //--------------------------------------------------------------------------------------------
 
 class Vector : public Var {
-public:
+public: // types
 
     typedef scalar_t value_t;
     typedef std::vector<scalar_t> storage_t;
+
+public: // methods
+
+    static std::string class_name() { return "Vector"; }
 
     Vector( const size_t& s, const scalar_t& v = scalar_t() ) : v_(s,v) {}
     Vector( const storage_t& v ) : v_(v) {}
 
     virtual Exp::Type type() const { return Exp::VECTOR; }
-    virtual std::string type_name() const { return "Vector"; }
-
-//    virtual ~Vector() { std::cout << "deleting Vector" << std::endl; }
+    virtual std::string type_name() const { return Vector::class_name(); }
 
     virtual size_t size() const { return v_.size(); }
 
@@ -152,10 +162,16 @@ VarPtr vector( const Vector::storage_t& v  ) { return VarPtr( new Vector(v) ); }
 
 //--------------------------------------------------------------------------------------------
 
-class ExpOp : public Exp {
-public:
+class Opr : public Exp {
+public: // methods
+
+    static std::string class_name() { return "Opr"; }
+
+    virtual bool isTerminal() const { return false; }
 
     virtual Exp::Type type() const { return Exp::OP; }
+    virtual std::string type_name() const { return Opr::class_name(); }
+
     virtual std::string opName() const = 0;
 
     virtual size_t arity() const = 0;
@@ -163,11 +179,11 @@ public:
 
 };
 
-typedef boost::shared_ptr<ExpOp> ExpOpPtr;
+typedef boost::shared_ptr<Opr> OprPtr;
 
 //--------------------------------------------------------------------------------------------
 
-class BinOp : public ExpOp {
+class BinOp : public Opr {
 
 public: // types
 
@@ -182,6 +198,8 @@ public: // methods
 
     BinOp( ExpPtr p1, ExpPtr p2 ) : p1_(p1), p2_(p2) {}
 
+    virtual std::string type_name() const { return BinOp::class_name(); }
+
     VarPtr eval()
     {
         BinOp::key_t k = boost::make_tuple( p1_->type(), p2_->type(), opName() );
@@ -191,7 +209,7 @@ public: // methods
         if( itr != d.end() )
             return ((*itr).second)( p1_, p2_ );
 
-        assert( p1_->isOp() || p2_->isOp() ); // either one is an Op
+        assert( p1_->isOpr() || p2_->isOpr() ); // either one is an Op
 
         p1_ = p1_->eval(); // possibly creates temporary
         p2_ = p2_->eval(); // possibly creates temporary
@@ -214,11 +232,6 @@ public: // methods
         return shared_from_this();
     }
 
-    virtual std::string type_name() const { return "BinOp"; }
-
-    ExpPtr& lhs() { return p1_; }
-    ExpPtr& rhs() { return p2_; }
-
     static dispatcher_t& dispatcher() { static dispatcher_t d; return d; }
     static optimiser_t& optimiser() { static optimiser_t o; return o; }
 
@@ -239,7 +252,7 @@ protected:
 
 //--------------------------------------------------------------------------------------------
 
-class TriOp : public ExpOp {
+class TriOp : public Opr {
 
 public: // types
 
@@ -266,7 +279,7 @@ public: // methods
         if( itr != d.end() )
             return ((*itr).second)( p1_, p2_, p3_ );
 
-        assert( p1_->isOp() || p2_->isOp() || p3_->isOp() ); // either one is an Op
+        assert( p1_->isOpr() || p2_->isOpr() || p3_->isOpr() ); // either one is an Op
 
         /// @todo optimize this dispatch by looking into possible reduction of temporaries
 
@@ -414,8 +427,8 @@ class ProdOptimser {
 public:
     static ExpPtr optimise_var_op( ExpPtr x )
     {
-        assert( x->isOp() );
-        ExpOp& op = *(x->as<ExpOp>());
+        assert( x->isOpr() );
+        Opr& op = *(x->as<Opr>());
 
         assert( op.opName() == "Prod" );
         assert( op.arity() == 2 );
@@ -423,10 +436,10 @@ public:
         ExpPtr p0 = op.param(0);
         ExpPtr p1 = op.param(1);
 
-        assert( p0->isVar() );
-        assert( p1->isOp()  );
+        assert( p0->isTerminal() );
+        assert( p1->isOpr()  );
 
-        ExpOpPtr op1 = p1->as<ExpOp>();
+        OprPtr op1 = p1->as<Opr>();
 
         if( op1->opName()  == "Add" )
         {
