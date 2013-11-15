@@ -29,20 +29,20 @@ int main()
 
     boost::any a2 = int(10);
     assert( ! a2.empty() );
-    std::cout << "a2 : " << boost::any_cast<int>(a2) << std::endl;
+    std::cout << "a2 : (" << a2.type().name() << ") : " << boost::any_cast<int>(a2) << std::endl;
 
     // 3. string
 
     boost::any a3 = std::string("lolo+koko");
     assert( ! a3.empty() );
-    std::cout << "a3 : " << boost::any_cast< std::string >(a3) << std::endl;
+    std::cout << "a3 : (" << a3.type().name() << ") : " << boost::any_cast< std::string >(a3) << std::endl;
 
     // 4. SomeType
 
     SomeType st1; st1.i_ = 20; st1.s_ = "popo";
     boost::any a4 = st1;
     assert( ! a4.empty() );
-    std::cout << "a4 : " << boost::any_cast< SomeType >(a4) << std::endl;
+    std::cout << "a4 : (" << a4.type().name() << ") : " << boost::any_cast< SomeType >(a4) << std::endl;
 
 }
 
