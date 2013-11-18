@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -15,6 +16,20 @@
 
 //--------------------------------------------------------------------------------------------
 
+/// @todo look into currying / binding
+///
+///  add2 = curry ( add , 2 )
+///
+/// @todo list
+///
+///    list 1 2
+///
+/// @todo map
+///
+///
+///
+/// @todo fold
+///
 /// @todo comparison operator Equal()(v,2) -- returns what?
 /// @todo unary operator
 /// @todo operator returning scalar
@@ -69,6 +84,11 @@ public:
 
     virtual VarPtr eval() = 0;
     virtual ExpPtr optimise() = 0;
+    virtual ExpPtr reduce();
+
+    virtual size_t arity() const = 0;
+    virtual ExpPtr param( const size_t& ) const = 0;
+    virtual void param( const size_t&, ExpPtr p ) { assert(false); }
 
     ExpPtr self() { return shared_from_this(); }
 
@@ -77,6 +97,11 @@ public:
 
     template< typename T >
     boost::shared_ptr<T> as() { return boost::dynamic_pointer_cast<T,Exp>( shared_from_this() ); }
+
+    virtual void print( std::ostream& ) const = 0;
+    virtual std::string signature() const = 0;
+
+    friend std::ostream& operator<<( std::ostream& os, const Exp& v) { v.print(os); return os; }
 };
 
 //--------------------------------------------------------------------------------------------
@@ -86,6 +111,9 @@ public:
 
     static std::string class_name() { return "Var"; }
 
+    virtual size_t arity() const { return 0; }
+    virtual ExpPtr param( const size_t& ) const { assert( false ); } // should not be called
+
     virtual bool isTerminal() const { return true; }
 
     virtual VarPtr eval() { return boost::static_pointer_cast<Var>( shared_from_this() ); }
@@ -93,10 +121,6 @@ public:
 
     virtual size_t size() const = 0;
 
-    virtual std::ostream& print( std::ostream& ) const = 0;
-
-    friend std::ostream& operator<<( std::ostream& os, const Var& v) { v.print(os); return os; }
-    friend std::ostream& operator<<( std::ostream& os, const VarPtr& v) { v->print(os); return os; }
 };
 
 //--------------------------------------------------------------------------------------------
@@ -117,7 +141,9 @@ public: // methods
     /// returns a reference to the scalar
     scalar_t& ref_value() { return v_; }
 
-    virtual std::ostream& print( std::ostream& o ) const { return o << v_; }
+    virtual void print( std::ostream& o ) const { o << v_; }
+
+    virtual std::string signature() const { return "s"; }
 
 protected:
     scalar_t v_;
@@ -151,7 +177,18 @@ public: // methods
     /// returns a reference to the internal vector
     storage_t& ref_value() { return v_; }
 
-    virtual std::ostream& print( std::ostream& o ) const { std::copy(v_.begin(),v_.end(), std::ostream_iterator<Vector::value_t>(o, " ")); return o; }
+    virtual void print( std::ostream& o ) const
+    {
+        o << "[";
+        for( size_t i = 0; i < v_.size(); ++i )
+        {
+            if(i) o << ", ";
+            o << v_[i];
+        }
+        o << "]";
+    }
+
+    virtual std::string signature() const { return "v"; }
 
 protected:
     storage_t v_;
@@ -174,8 +211,38 @@ public: // methods
 
     virtual std::string opName() const = 0;
 
-    virtual size_t arity() const = 0;
-    virtual ExpPtr& param( const size_t& ) = 0;
+    virtual void print( std::ostream& o ) const
+    {
+        o << opName() << "(";
+        for( size_t i = 0; i < arity(); ++i )
+        {
+            if(i) o << ", ";
+            o << *param(i);
+        }
+        o << ")";
+    }
+
+    virtual std::string signature() const
+    {
+        std::ostringstream o;
+        o << opName() << "(";
+        for( size_t i = 0; i < arity(); ++i )
+        {
+            if(i) o << ",";
+            o << param(i)->signature();
+        }
+        o << ")";
+        return o.str();
+    }
+
+    virtual ExpPtr reduce()
+    {
+        for( size_t i = 0; i < arity(); ++i )
+        {
+            ExpPtr e = param(i);
+            param(i,e->reduce() );
+        }
+    }
 
 };
 
@@ -236,11 +303,20 @@ public: // methods
     static optimiser_t& optimiser() { static optimiser_t o; return o; }
 
     virtual size_t arity() const { return 2; }
-    virtual ExpPtr& param( const size_t& i )
+    virtual ExpPtr param( const size_t& i ) const
     {
         assert( i < 2 );
         if( i ) return p2_;
         return p1_;
+    }
+
+    virtual void param( const size_t& i, ExpPtr p )
+    {
+        assert( i < 2 );
+        if( i )
+            p2_ = p;
+        else
+            p1_ = p;
     }
 
 protected:
@@ -319,7 +395,7 @@ public: // methods
     static optimiser_t& optimiser() { static optimiser_t o; return o; }
 
     virtual size_t arity() const { return 3; }
-    virtual ExpPtr& param( const size_t& i )
+    virtual ExpPtr param( const size_t& i ) const
     {
         assert( i < arity() );
         if( i == 0 ) return p1_;
@@ -397,7 +473,7 @@ public:
         return VarPtr(res);
     }
 
-    ExpPtr operator() ( ExpPtr l, ExpPtr r ) { return ExpPtr( new Add::Op(l,r) ); }
+    ExpPtr operator() ( ExpPtr p1, ExpPtr p2 ) { return ExpPtr( new Add::Op(p1,p2) ); }
 
     struct Register
     {
@@ -544,6 +620,102 @@ ExpPtr prod( Exp&   l, Exp&   r ) { return ExpPtr( new Prod::Op(l.self(),r.self(
 
 //--------------------------------------------------------------------------------------------
 
+/// Generates a Linear combination of vectors
+class Linear : public Var {
+public:
+
+    Linear( ExpPtr e )
+    {
+        assert( e->arity() == 2 );
+
+        ExpPtr left  = e->param(0);
+        ExpPtr right = e->param(1);
+
+        assert( left->arity() == 2 );
+        assert( right->arity() == 2 );
+
+        s1_ = left->param(0);
+        v1_ = left->param(1);
+        s2_ = right->param(0);
+        v2_ = right->param(1);
+
+        /// should check vectors of smae size
+    }
+
+    virtual void print( std::ostream& o ) const
+    {
+        o << "linear(" << *s1_ << "," << *v1_ << "," << *s2_ << "," << *v2_ << ")";
+    }
+
+    virtual std::string signature() const
+    {
+        return "l";
+    }
+
+    virtual size_t size() const { assert( false ); return 0; }
+
+    virtual Exp::Type type() const { assert( false ); }
+    virtual std::string type_name() const { assert( false ); }
+
+    virtual bool isTerminal() const { assert( false ); }
+
+private:
+
+    ExpPtr s1_;
+    ExpPtr v1_;
+    ExpPtr s2_;
+    ExpPtr v2_;
+
+};
+
+class Reducer {
+public:
+
+    typedef std::map<std::string,Reducer*> reducers_t;
+
+    static ExpPtr build( ExpPtr e )
+    {
+        std::string signature = e->signature();
+
+        reducers_t& reducer = reducers();
+        std::map<std::string,Reducer*>::const_iterator itr = reducer.find(signature);
+        if( itr == reducer.end() )
+            return e;
+        return (*itr).second->make(e);
+    }
+
+
+protected:
+
+    Reducer( const std::string& signature )
+    {
+        reducers()[signature] = this;
+    }
+
+    virtual ExpPtr make( ExpPtr ) const = 0;
+
+    static reducers_t& reducers()
+    {
+        static reducers_t reducers_;
+        return reducers_;
+    }
+};
+
+template< typename T>
+class Optimiser : public Reducer {
+public:
+    Optimiser( const std::string& signature ) : Reducer(signature) {}
+ private:
+    ExpPtr make( ExpPtr e ) const
+    {
+        return ExpPtr( new T(e) );
+    }
+};
+
+static Optimiser<Linear> optimLinear("Add(Prod(s,v),Prod(s,v))");
+
+//--------------------------------------------------------------------------------------------
+
 /// Generates a ProdAdd expressions
 class ProdAdd {
 public:
@@ -658,6 +830,8 @@ ExpPtr operator* ( ExpPtr p1, ExpPtr p2 ) { return prod( p1, p2 ); }
 
 //--------------------------------------------------------------------------------------------
 
+ExpPtr Exp::reduce(){ return Reducer::build( shared_from_this() ); }
+
 } // namespace maths
 
 //--------------------------------------------------------------------------------------------
@@ -677,6 +851,7 @@ int main()
 //    std::cout << "v1 = " << v1 << std::endl;
 //    std::cout << "v2 = " << v2 << std::endl;
 
+#if 0
     // scalar + scalar --> 6 = 2 + 4
 
     VarPtr r = Add()( a , c )->eval();
@@ -743,6 +918,17 @@ int main()
 
     ExpPtr op13 = a * ( v1 + ( a * ( v1 + v2 ) ) );
     std::cout << "r13 = " << op13->eval() << std::endl;
+#endif
+
+    ExpPtr op14 =  add( prod( a, v1) , prod( c, v2 ));
+
+    std::cout << *op14 << std::endl;
+    std::cout << op14->signature() << std::endl;
+
+    op14 = op14->reduce();
+
+    std::cout << *op14 << std::endl;
+    std::cout << op14->signature() << std::endl;
 
 #if 0
 
