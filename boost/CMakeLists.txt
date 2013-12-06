@@ -21,6 +21,7 @@ if( ENABLE_BOOST )
 	# add_subdirectory( aop )
 	#	add_subdirectory( monads )
 	add_subdirectory( expressions )
+	add_subdirectory( ycombinator )
 
   endif()
 
