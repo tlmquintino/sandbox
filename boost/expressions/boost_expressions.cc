@@ -138,9 +138,6 @@ public: // methods
     virtual size_t size() const { return 1; }
     scalar_t value() const { return v_; }
 
-    /// returns a reference to the scalar
-    scalar_t& ref_value() { return v_; }
-
     virtual void print( std::ostream& o ) const { o << v_; }
 
     virtual std::string signature() const { return "s"; }
