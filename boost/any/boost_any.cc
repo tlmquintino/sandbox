@@ -30,6 +30,7 @@ int main()
     boost::any a2 = int(10);
     assert( ! a2.empty() );
     std::cout << "a2 : (" << a2.type().name() << ") : " << boost::any_cast<int>(a2) << std::endl;
+//    std::cout << "a2 : (" << a2.type().name() << ") : " << boost::any_cast<size_t>(a2) << std::endl;
 
     // 3. string
 
