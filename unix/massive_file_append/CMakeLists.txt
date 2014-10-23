@@ -1,0 +1,1 @@
+add_executable( massive_file_append massive_file_append.cc )

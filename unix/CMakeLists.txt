@@ -8,5 +8,6 @@ add_subdirectory( memory_exhaust )
 add_subdirectory( mmap )
 add_subdirectory( signal_handling )
 add_subdirectory( signals_ipc )
+add_subdirectory( massive_file_append )
 
 endif()
