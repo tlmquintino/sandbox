@@ -13,5 +13,6 @@ add_subdirectory( auto )
 add_subdirectory( thread )
 add_subdirectory( aop )
 # add_subdirectory( monads )
+add_subdirectory( evil_inheritance )
 
 endif()
